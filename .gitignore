@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+*.xcodeproj
+.DS_Store
+
+# Lokale Werkzeugkonfiguration und Bauergebnisse
+.claude/
+dist/
