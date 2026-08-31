@@ -7,12 +7,10 @@ on:
 
 jobs:
   build:
-    # Roger baut gegen das Speech-Framework von macOS 26; ältere Runner-Bilder
-    # kennen `SpeechAnalyzer` nicht und scheitern beim Kompilieren.
-    #
-    # Sollte GitHub das Bild `macos-26` noch nicht anbieten, schlägt der Lauf mit
-    # »no runner matching the labels« fehl — dann bleibt nur warten oder ein
-    # eigener Runner. Lokal ändert das nichts: `swift build && swift test`.
+    # Roger builds against the macOS 26 Speech framework; older runner images do
+    # not know `SpeechAnalyzer` and fail to compile. Pinning the version rather
+    # than using `macos-latest` is deliberate — a rolling label would silently
+    # move the floor under the build.
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
