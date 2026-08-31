@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    # Roger baut gegen das Speech-Framework von macOS 26; ältere Runner-Bilder
+    # kennen `SpeechAnalyzer` nicht und scheitern beim Kompilieren.
+    #
+    # Sollte GitHub das Bild `macos-26` noch nicht anbieten, schlägt der Lauf mit
+    # »no runner matching the labels« fehl — dann bleibt nur warten oder ein
+    # eigener Runner. Lokal ändert das nichts: `swift build && swift test`.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version melden
+        run: swift --version
+      - name: Bauen
+        run: swift build -c release
+      - name: Tests
+        run: swift test
