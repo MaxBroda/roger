@@ -192,7 +192,17 @@ from source has no Gatekeeper hurdle at all.
 
 More detail in [`docs/ideen.md`](docs/ideen.md).
 
+## Contributing
+
+Issues and pull requests are welcome. By opening a pull request you agree that
+your contribution is licensed under the same terms as the project.
+
 ## License
 
-MIT, see [LICENSE](LICENSE). The bundled fonts (Share Tech Mono, IBM Plex Mono)
-are under the SIL Open Font License 1.1.
+MIT with the [Commons Clause](https://commonsclause.com), see
+[LICENSE](LICENSE). In short: clone it, build it, change it, use it wherever you
+like — including at work. What you may not do is sell it, or sell a product or
+service whose value comes substantially from it.
+
+The bundled fonts (Share Tech Mono, IBM Plex Mono) are under the SIL Open Font
+License 1.1.
