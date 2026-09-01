@@ -16,6 +16,10 @@ public actor SpeechAnalyzerTranscriber: Transcribing, LocaleConfigurable, Contex
 
     private var locale: Locale?
     private var contextPhrases: [String] = []
+    /// Cached so the first dictation does not wait for `bestAvailableAudioFormat`
+    /// — that call takes several hundred ms to over a second on the cold path
+    /// and would leave the waveform flat at the start of the recording.
+    private var cachedAudioFormat: AVAudioFormat?
 
     public init(
         preference: LanguagePreference = LanguagePreference(),
@@ -38,10 +42,16 @@ public actor SpeechAnalyzerTranscriber: Transcribing, LocaleConfigurable, Contex
             throw RogerError.transcriberUnavailable(locale: "—")
         }
         try await activate(chosen)
+        // Warm the audio-format cache now, so the first dictation does not pay
+        // for the cold-path lookup while the waveform is already on screen.
+        _ = await preferredAudioFormat()
     }
 
     public func preferredAudioFormat() async -> AVAudioFormat? {
-        await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [makeModule()])
+        if let cachedAudioFormat { return cachedAudioFormat }
+        let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [makeModule()])
+        cachedAudioFormat = format
+        return format
     }
 
     public func transcribe(_ audio: AsyncStream<AudioChunk>) async throws -> Transcript? {
@@ -133,6 +143,9 @@ public actor SpeechAnalyzerTranscriber: Transcribing, LocaleConfigurable, Contex
         try await AssetInventory.reserve(locale: resolved)
 
         locale = resolved
+        // Different locale means a different module, so the cached format from
+        // the previous one may no longer be the best match.
+        cachedAudioFormat = nil
     }
 
     private func download(_ request: AssetInstallationRequest) async throws {
