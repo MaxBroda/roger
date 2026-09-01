@@ -64,6 +64,37 @@ public final class RogerApp {
         self.history = history
         self.hotkey = hotkeyPreference.binding
         self.isMenuBarOnly = menuBarModePreference.isMenuBarOnly
+        observeWake()
+    }
+
+    /// After sleep the CGEvent tap is often gone and the session died with it —
+    /// the retry ceiling had usually run out by then, so the menu bar item stayed
+    /// but the hotkey did nothing. Wake resets the count and tries once more.
+    ///
+    /// No teardown: `RogerApp` lives for the whole process, so the observer is
+    /// released when the process exits.
+    private func observeWake() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.handleWake() }
+        }
+    }
+
+    private func handleWake() {
+        Self.log.info("System woke — checking dictation stack.")
+        // Retry budget starts fresh: whatever failed before sleep does not count
+        // against the post-wake attempt.
+        startAttempt = 0
+        retryTask?.cancel()
+        retryTask = nil
+        // Only rebuild if the stack is actually down. A live session survives
+        // sleep just fine — rebuilding would kill an active recording.
+        if session == nil {
+            startDictationStack()
+        }
     }
 
     var isRunning: Bool { session != nil }
