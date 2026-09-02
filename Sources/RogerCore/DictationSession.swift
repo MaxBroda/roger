@@ -1,5 +1,6 @@
 import AVFAudio
 import Foundation
+import os
 
 /// The state machine. Knows no frameworks — only the five ports.
 ///
@@ -7,6 +8,11 @@ import Foundation
 /// microphone off, the stream ends, the result gets formatted and injected.
 @MainActor
 public final class DictationSession {
+    private static let log = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.mbr.roger",
+        category: "session"
+    )
+
     /// Ceilings so no state can hang — without them any backend stall is final and
     /// only a relaunch brings Roger back.
     private enum Limit {
@@ -102,24 +108,33 @@ public final class DictationSession {
         generation += 1
         let generation = self.generation
         state = .recording
+        Self.log.info("begin() generation=\(generation, privacy: .public)")
 
         dictationTask = Task { [audio, transcriber, formatter, injector] in
             do {
+                let beginInstant = ContinuousClock.now
                 let format = await transcriber.preferredAudioFormat() ?? AudioFormat.fallback
+                let formatElapsed = ContinuousClock.now - beginInstant
+                Self.log.info("preferredAudioFormat resolved after \(formatElapsed, privacy: .public) generation=\(generation, privacy: .public)")
 
                 // Released before the backend named its format: opening the
                 // microphone now would hang the session in transcribing forever,
                 // because the `stop()` from `end()` has already passed.
                 guard self.generation == generation, self.state == .recording else {
+                    Self.log.info("dictation cancelled before openMicrophone. generation=\(generation, privacy: .public)")
                     self.setState(.idle, generation: generation)
                     return
                 }
 
+                let openInstant = ContinuousClock.now
                 let source = try await self.openMicrophone(audio, format: format)
+                let openElapsed = ContinuousClock.now - openInstant
+                Self.log.info("openMicrophone completed after \(openElapsed, privacy: .public) generation=\(generation, privacy: .public)")
 
                 // Second check: if the release fell between opening and here, the
                 // `stop()` ran into nothing.
                 guard self.generation == generation, self.state == .recording else {
+                    Self.log.info("dictation cancelled between open and transcribe. generation=\(generation, privacy: .public)")
                     self.closeMicrophone(audio)
                     self.setState(.idle, generation: generation)
                     return
@@ -127,11 +142,15 @@ public final class DictationSession {
 
                 let stream = self.metered(source, sampleRate: format.sampleRate)
 
+                let transcribeInstant = ContinuousClock.now
                 // Runs until `end()` stops the microphone and the stream ends.
                 guard let raw = try await transcriber.transcribe(stream) else {
+                    Self.log.info("transcribe returned nil. generation=\(generation, privacy: .public)")
                     self.setState(.idle, generation: generation)
                     return
                 }
+                let transcribeElapsed = ContinuousClock.now - transcribeInstant
+                Self.log.info("transcribe completed after \(transcribeElapsed, privacy: .public) generation=\(generation, privacy: .public)")
 
                 let polished = try await formatter.format(raw)
 
@@ -143,8 +162,10 @@ public final class DictationSession {
                 self.onCompleted?(polished)
                 self.setState(.idle, generation: generation)
             } catch is CancellationError {
+                Self.log.info("dictation cancelled via CancellationError. generation=\(generation, privacy: .public)")
                 self.setState(.idle, generation: generation)
             } catch {
+                Self.log.error("dictation failed: \(error.localizedDescription, privacy: .public) generation=\(generation, privacy: .public)")
                 await self.fail(with: error, generation: generation)
             }
         }
@@ -178,6 +199,7 @@ public final class DictationSession {
 
     private func end() {
         guard state == .recording else { return }
+        Self.log.info("end() generation=\(self.generation, privacy: .public)")
         state = .transcribing
         closeMicrophone(audio)
     }
