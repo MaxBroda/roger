@@ -204,7 +204,7 @@ public final class DictationSession {
         closeMicrophone(audio)
     }
 
-    /// `nonisolated` on purpose: `AVAudioEngine.start()` can block for seconds,
+    /// `nonisolated` on purpose: opening a capture device can block for seconds,
     /// and macOS revokes the event tap when the main thread stalls.
     private nonisolated func openMicrophone(
         _ audio: any AudioCapturing,
