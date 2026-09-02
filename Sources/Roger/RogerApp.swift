@@ -26,6 +26,9 @@ public final class RogerApp {
     private(set) var hotkey: HotkeyBinding
     /// No Dock icon, no app switcher entry, no window on launch.
     private(set) var isMenuBarOnly: Bool
+    /// Which input device the microphone capture will pin at the next start.
+    /// Mirrors the persisted preference so SwiftUI observes changes.
+    private(set) var inputDeviceSelection: InputDeviceSelection
 
     let dictionary: DictionaryStore
     let history: HistoryStore
@@ -51,6 +54,7 @@ public final class RogerApp {
 
     private let hotkeyPreference = HotkeyPreference()
     private let menuBarModePreference = MenuBarModePreference()
+    private let inputDevicePreference = InputDevicePreference()
     private var transcriber: SpeechAnalyzerTranscriber?
     private var monitor: HoldKeyMonitor?
     private var session: DictationSession?
@@ -64,6 +68,7 @@ public final class RogerApp {
         self.history = history
         self.hotkey = hotkeyPreference.binding
         self.isMenuBarOnly = menuBarModePreference.isMenuBarOnly
+        self.inputDeviceSelection = inputDevicePreference.selection
         observeWake()
     }
 
@@ -120,7 +125,7 @@ public final class RogerApp {
 
         let session = DictationSession(
             hotkey: monitor,
-            audio: MicrophoneCapture(),
+            audio: MicrophoneCapture(preference: inputDevicePreference),
             transcriber: transcriber,
             formatter: DictionaryCorrector(store: dictionary),
             injector: PasteboardInjector(),
@@ -254,6 +259,22 @@ public final class RogerApp {
         menuBarModePreference.store(isMenuBarOnly)
         self.isMenuBarOnly = isMenuBarOnly
         onMenuBarModeChange?()
+    }
+
+    /// The user's persisted input-device choice. `MicrophoneCapture` re-reads
+    /// this at the start of every dictation, so a change here takes effect on
+    /// the next press — no stack restart needed.
+    func selectInputDevice(_ selection: InputDeviceSelection) {
+        guard selection != inputDeviceSelection else { return }
+        inputDevicePreference.store(selection)
+        inputDeviceSelection = selection
+        onStatusChange?()
+    }
+
+    /// Every input device macOS currently exposes. Read on demand from
+    /// CoreAudio; the settings view calls this every time it opens.
+    func availableInputDevices() -> [InputDevice] {
+        AudioDeviceEnumerator.inputDevices()
     }
 
     /// One line, the same everywhere: menu bar, title bar, status field.

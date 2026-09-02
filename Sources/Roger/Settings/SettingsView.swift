@@ -12,15 +12,17 @@ struct SettingsView: View {
     private static let thresholds = [150, 200, 220, 280, 350, 450]
 
     var body: some View {
-        VStack(spacing: Design.Space.xl) {
-            hotkeyPanel
-            languagePanel
-            modePanel
-            filesPanel
-            Spacer(minLength: 0)
+        ScrollView {
+            VStack(spacing: Design.Space.xl) {
+                hotkeyPanel
+                languagePanel
+                microphonePanel
+                modePanel
+                filesPanel
+            }
+            .padding(Design.Space.xl)
         }
-        .padding(Design.Space.xl)
-        .frame(width: 560, height: 740)
+        .frame(width: 560, height: 640)
         .background(Design.Palette.background)
     }
 
@@ -138,6 +140,109 @@ struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Microphone
+
+    /// Available input devices are queried each time the settings view is
+    /// rendered — cheap, and picks up hot-plugged devices without observers.
+    private var microphonePanel: some View {
+        let devices = app.availableInputDevices()
+        let hasBuiltIn = devices.contains { $0.transport == .builtIn }
+        let selection = app.inputDeviceSelection
+
+        return RecessedPanel("Mikrofon") {
+            VStack(alignment: .leading, spacing: Design.Space.sm) {
+                microphoneRow(
+                    label: "Automatisch (System-Standard)",
+                    detail: nil,
+                    warning: nil,
+                    isActive: selection == .automatic,
+                    action: { app.selectInputDevice(.automatic) }
+                )
+                if hasBuiltIn {
+                    microphoneRow(
+                        label: "Eingebautes Mikrofon (empfohlen)",
+                        detail: nil,
+                        warning: nil,
+                        isActive: selection == .builtIn,
+                        action: { app.selectInputDevice(.builtIn) }
+                    )
+                }
+                ForEach(devices.filter { $0.transport != .builtIn }) { device in
+                    microphoneRow(
+                        label: device.name,
+                        detail: transportLabel(for: device),
+                        warning: device.transport == .bluetooth ? bluetoothWarning : nil,
+                        isActive: selection == .explicit(uid: device.uid),
+                        action: { app.selectInputDevice(.explicit(uid: device.uid)) }
+                    )
+                }
+
+                Text(microphoneExplanation)
+                    .textStyle(Design.Typography.timestamp)
+                    .foregroundStyle(Design.Palette.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, Design.Space.xs)
+            }
+        }
+    }
+
+    private func microphoneRow(
+        label: String,
+        detail: String?,
+        warning: String?,
+        isActive: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: Design.Space.md) {
+                Circle()
+                    .fill(isActive ? Design.Palette.accentAmber : Design.Palette.surfaceBorder)
+                    .frame(width: Design.Indicator.size, height: Design.Indicator.size)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .textStyle(Design.Typography.body)
+                        .foregroundStyle(Design.Palette.textPrimary)
+                    if let warning {
+                        Text(warning)
+                            .textStyle(Design.Typography.timestamp)
+                            .foregroundStyle(Design.Palette.accentRed)
+                    }
+                }
+                Spacer()
+                if let detail {
+                    EquipmentLabel(detail)
+                }
+            }
+            .padding(.vertical, Design.Space.xs)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func transportLabel(for device: InputDevice) -> String {
+        switch device.transport {
+        case .builtIn: return "Eingebaut"
+        case .wired: return "Kabel"
+        case .bluetooth: return "Bluetooth"
+        case .continuity: return "iPhone / iPad"
+        case .aggregate: return "Aggregat"
+        case .virtual: return "Virtuell"
+        case .unknown: return "Sonstige"
+        }
+    }
+
+    private var bluetoothWarning: String {
+        "Verzögerter Start, verringerte Musik-Qualität, mehr Erkennungsfehler."
+    }
+
+    private var microphoneExplanation: String {
+        """
+        Bluetooth-Kopfhörer schalten beim Aufnehmen auf einen Mono-Modus mit \
+        geringer Qualität. Für das Diktat empfehlen wir das eingebaute \
+        Mikrofon; die Musik bleibt in voller Qualität auf den Kopfhörern.
+        """
     }
 
     private var modePanel: some View {
