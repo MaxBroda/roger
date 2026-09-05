@@ -26,7 +26,7 @@ public final class DictationSession {
             // Every way out of `recording` ends the reason to keep the music
             // down — release, error, watchdog, shutdown. One place instead of
             // five, so no path can forget it.
-            if oldValue == .recording { resumeMedia(media) }
+            if oldValue == .recording { media.resumeAfterDictation(waitingForRoute: true) }
             armWatchdog()
             onStateChange?(state)
         }
@@ -107,9 +107,8 @@ public final class DictationSession {
         dictationTask?.cancel()
         audio.stop()
         hotkey.stop()
-        // Synchronous here on purpose: on quit a detached task may never run,
-        // and the music would stay paused with no one left to resume it. No
-        // waiting for the audio route either — there is no time for it.
+        // No waiting for the audio route here — on quit there is no time for it,
+        // and this call blocks until the music is back.
         media.resumeAfterDictation(waitingForRoute: false)
         state = .idle
     }
@@ -122,7 +121,7 @@ public final class DictationSession {
         Self.log.info("begin() generation=\(generation, privacy: .public)")
         // Before the microphone opens: with Bluetooth headsets the switch to the
         // low-quality call mode then happens while nothing is audible anyway.
-        pauseMedia(media)
+        media.pauseForDictation()
 
         dictationTask = Task { [audio, transcriber, formatter, injector] in
             do {
@@ -231,17 +230,6 @@ public final class DictationSession {
     /// once the engine stops.
     private nonisolated func closeMicrophone(_ audio: any AudioCapturing) {
         Task.detached { audio.stop() }
-    }
-
-    /// Also off the main thread: asking CoreAudio whether anything is playing
-    /// costs tens of milliseconds on the first call, and a stalled main thread
-    /// costs Roger its event tap.
-    private nonisolated func pauseMedia(_ media: any MediaPlaybackControlling) {
-        Task.detached { media.pauseForDictation() }
-    }
-
-    private nonisolated func resumeMedia(_ media: any MediaPlaybackControlling) {
-        Task.detached { media.resumeAfterDictation(waitingForRoute: true) }
     }
 
     private func fail(with error: any Error, generation: Int) async {

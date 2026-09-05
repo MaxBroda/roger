@@ -32,6 +32,13 @@ public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sen
     private typealias SendCommand = @convention(c) (Int32, CFDictionary?) -> Bool
 
     private let preference: MusicPausePreference
+    /// Every command runs here, one at a time and in the order it was issued.
+    /// Ordering is the point: a resume that overtakes its pause finds nothing to
+    /// resume, and the music stays down with nobody left to bring it back. That
+    /// it also keeps CoreAudio off the main thread — the first probe costs tens
+    /// of milliseconds, and a stalled main thread costs Roger its event tap — is
+    /// the second reason.
+    private let queue = DispatchQueue(label: "com.mbr.roger.media")
     private let lock = NSLock()
     private var sendCommand: SendCommand?
     private var loadAttempted = false
@@ -41,6 +48,8 @@ public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sen
     /// How the output ran before the dictation. The resume waits for this to
     /// come back — see ``waitForRoute()``.
     private var routeBeforePause: AudioDeviceEnumerator.OutputRoute?
+    /// Set once on quit, never cleared: from here on nothing may wait any more.
+    private var isTerminating = false
 
     public init(preference: MusicPausePreference = MusicPausePreference()) {
         self.preference = preference
@@ -50,12 +59,31 @@ public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sen
     /// framework a few more — both would otherwise land in the first dictation.
     public func warmUp() {
         guard preference.pausesMusic else { return }
-        _ = loadedSendCommand()
-        _ = AudioDeviceEnumerator.isDefaultOutputActive()
+        queue.async {
+            _ = self.loadedSendCommand()
+            _ = AudioDeviceEnumerator.isDefaultOutputActive()
+        }
     }
 
     public func pauseForDictation() {
         guard preference.pausesMusic else { return }
+        queue.async { self.pause() }
+    }
+
+    public func resumeAfterDictation(waitingForRoute: Bool) {
+        guard waitingForRoute else {
+            // The quit path: after the return there may be no process left to
+            // run anything, so this one waits for the queue instead of handing
+            // the work over. `isTerminating` cuts a running route wait short, so
+            // the wait stays a matter of milliseconds.
+            lock.withLock { isTerminating = true }
+            queue.sync { self.resume(waitingForRoute: false) }
+            return
+        }
+        queue.async { self.resume(waitingForRoute: true) }
+    }
+
+    private func pause() {
         guard AudioDeviceEnumerator.isDefaultOutputActive() else {
             Self.log.info("No audio playing — nothing to pause.")
             return
@@ -68,7 +96,7 @@ public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sen
         }
     }
 
-    public func resumeAfterDictation(waitingForRoute: Bool) {
+    private func resume(waitingForRoute: Bool) {
         let (shouldResume, baseline) = lock.withLock {
             defer {
                 didPause = false
@@ -88,6 +116,7 @@ public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sen
     private func waitForRoute(_ baseline: AudioDeviceEnumerator.OutputRoute) {
         let deadline = ContinuousClock.now + .seconds(4)
         while ContinuousClock.now < deadline {
+            guard !lock.withLock({ isTerminating }) else { return }
             guard let current = AudioDeviceEnumerator.defaultOutputRoute() else { return }
             // Output was switched or unplugged meanwhile — the old rate says
             // nothing about the new device.
