@@ -17,13 +17,13 @@ public final class SpectrumAnalyzer {
 
     /// Levels rise fast and fall back slowly — without the afterglow the display
     /// flickers, with too much it feels sluggish. At 0.88 a bar takes about
-    /// 260 ms to fall back to a third: speech runs at four to seven syllables a
+    /// 290 ms to fall back to a third: speech runs at four to seven syllables a
     /// second, and a faster fall makes the bars read as fast-forwarded.
     private static let decay: Float = 0.88
     /// Weight of the previous level on the way up. Not zero, because a headset
     /// mic rides its own automatic gain: single-frame spikes would snap the bar
     /// to full height. At 0.55 a bar still reaches nine tenths of a step within
-    /// about 80 ms — an onset still reads as immediate.
+    /// about 130 ms — an onset still reads as immediate.
     private static let attack: Float = 0.55
 
     /// Analyses per second. Chunk sizes differ per device — the built-in mic
@@ -75,7 +75,12 @@ public final class SpectrumAnalyzer {
     public func analyze(_ chunk: AudioChunk) -> [Float] {
         guard append(from: chunk.buffer) else { return levels }
         guard samplesSinceAnalysis >= hopSize else { return levels }
-        samplesSinceAnalysis = 0
+        // Keep the remainder instead of clearing it: chunk sizes are no multiple
+        // of the hop, and dropping it would quantise the rate to the chunk grid
+        // — 10 ms as well as 20 ms chunks would then analyse every 40 ms instead
+        // of every 33 ms. Surplus beyond one hop is gone either way, because a
+        // chunk yields at most one analysis.
+        samplesSinceAnalysis %= hopSize
         copyWindow()
 
         var windowed = [Float](repeating: 0, count: fftSize)
