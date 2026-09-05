@@ -59,6 +59,7 @@ public final class RogerApp {
     private let inputDevicePreference = InputDevicePreference()
     private let musicPausePreference = MusicPausePreference()
     private var transcriber: SpeechAnalyzerTranscriber?
+    private var media: MediaRemotePlayback?
     private var monitor: HoldKeyMonitor?
     private var session: DictationSession?
     private var runTask: Task<Void, Never>?
@@ -128,6 +129,7 @@ public final class RogerApp {
         self.monitor = monitor
 
         let media = MediaRemotePlayback(preference: musicPausePreference)
+        self.media = media
 
         let session = DictationSession(
             hotkey: monitor,
@@ -155,7 +157,7 @@ public final class RogerApp {
         beginPreparing("Lade Sprachmodell …")
         runTask = Task { [weak self] in
             do {
-                media.warmUp()
+                media.refreshMonitoring()
                 try await transcriber.prepare()
                 self?.finishPreparing()
                 await self?.refreshLanguages()
@@ -173,6 +175,7 @@ public final class RogerApp {
         failureResetTask?.cancel()
         runTask?.cancel()
         session?.shutdown()
+        media?.stopMonitoring()
     }
 
     /// Tear down, report, retry: if `.failed` stayed, the event tap would be gone
@@ -192,6 +195,10 @@ public final class RogerApp {
         session = nil
         monitor = nil
         transcriber = nil
+        // The monitor is a child process: without this the next stack would
+        // start a second one.
+        media?.stopMonitoring()
+        media = nil
     }
 
     private func scheduleRetry() {
@@ -285,6 +292,9 @@ public final class RogerApp {
         guard pausesMusic != pausesMusicWhileDictating else { return }
         musicPausePreference.store(pausesMusic)
         pausesMusicWhileDictating = pausesMusic
+        // Switching on starts the now-playing monitor, switching off ends it —
+        // no background process for a feature nobody asked for.
+        media?.refreshMonitoring()
     }
 
     /// Every input device macOS currently exposes. Read on demand from

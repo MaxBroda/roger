@@ -5,9 +5,14 @@
 /// pause and resume must never overtake each other, or a resume runs into a
 /// dictation that has not paused yet and leaves the music down for good.
 public protocol MediaPlaybackControlling: Sendable {
-    /// Pays the one-off setup cost (framework, CoreAudio) up front so the first
-    /// dictation does not.
-    func warmUp()
+    /// Brings the implementation in line with the current setting — the state it
+    /// needs may cost a background process, which nobody should pay for a
+    /// feature they switched off. Also pays the one-off setup cost up front, so
+    /// the first dictation does not.
+    func refreshMonitoring()
+
+    /// Gives up whatever ``refreshMonitoring()`` started.
+    func stopMonitoring()
     /// Pauses playback if the user asked for it and something is actually
     /// playing. Doing nothing is a valid outcome.
     func pauseForDictation()

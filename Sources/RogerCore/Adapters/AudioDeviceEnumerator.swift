@@ -42,29 +42,6 @@ public enum AudioDeviceEnumerator {
         }
     }
 
-    /// Whether anything is currently playing audio out of the default output
-    /// device. CoreAudio answers this for the device as a whole, so it says
-    /// "sound is coming out", not "a music player is running" — a video call or
-    /// a system alert counts too.
-    ///
-    /// The device ID is looked up every time on purpose: plugging in headphones
-    /// moves the default output, and a cached ID would then report on the wrong
-    /// device.
-    public static func isDefaultOutputActive() -> Bool {
-        guard let id = defaultOutputDeviceID() else { return false }
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var value: UInt32 = 0
-        var size = UInt32(MemoryLayout<UInt32>.size)
-        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else {
-            return false
-        }
-        return value != 0
-    }
-
     /// The default output device and the rate it currently runs at.
     ///
     /// The rate is the tell for a Bluetooth headset's mode: playing music it
