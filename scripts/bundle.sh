@@ -42,10 +42,23 @@ mkdir -p "$CONTENTS/Resources/Fonts"
 cp "$ROOT/Resources/Fonts/"*.ttf "$CONTENTS/Resources/Fonts/"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 
+# The MediaRemote adapter. Nothing links against the library — `/usr/bin/perl`
+# loads it at runtime, and the script insists on a directory named `X.framework`
+# holding a file named `X`. That layout is all it needs, no bundle plist.
+FRAMEWORK="$CONTENTS/Frameworks/MediaRemoteAdapter.framework"
+rm -rf "$FRAMEWORK"
+mkdir -p "$FRAMEWORK"
+cp "$(dirname "$BINARY")/libMediaRemoteAdapter.dylib" "$FRAMEWORK/MediaRemoteAdapter"
+cp "$ROOT/Resources/mediaremote-adapter.pl" "$CONTENTS/Resources/mediaremote-adapter.pl"
+
 # codesign refuses to work with extended attributes ("resource fork, Finder
 # information, or similar detritus not allowed"), which the copied binary may
 # have dragged in from .build.
 xattr -cr "$APP"
+
+# Nested code first: a signature over the app does not cover it, and an unsigned
+# library inside a signed bundle is what breaks first when the rules tighten.
+codesign --force --sign "$SIGN_ID" --timestamp=none "$FRAMEWORK/MediaRemoteAdapter"
 
 codesign --force --sign "$SIGN_ID" \
   --identifier com.mbr.roger \
