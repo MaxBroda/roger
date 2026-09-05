@@ -55,6 +55,7 @@ public final class RogerApp {
     private let hotkeyPreference = HotkeyPreference()
     private let menuBarModePreference = MenuBarModePreference()
     private let inputDevicePreference = InputDevicePreference()
+    private let musicPausePreference = MusicPausePreference()
     private var transcriber: SpeechAnalyzerTranscriber?
     private var monitor: HoldKeyMonitor?
     private var session: DictationSession?
@@ -123,12 +124,15 @@ public final class RogerApp {
         let monitor = HoldKeyMonitor(binding: hotkey)
         self.monitor = monitor
 
+        let media = MediaRemotePlayback(preference: musicPausePreference)
+
         let session = DictationSession(
             hotkey: monitor,
             audio: MicrophoneCapture(preference: inputDevicePreference),
             transcriber: transcriber,
             formatter: DictionaryCorrector(store: dictionary),
             injector: PasteboardInjector(),
+            media: media,
             spectrumBandCount: Design.Spectrum.bandCount
         )
         session.onStateChange = { [weak self] state in self?.apply(state) }
@@ -148,6 +152,7 @@ public final class RogerApp {
         beginPreparing("Lade Sprachmodell …")
         runTask = Task { [weak self] in
             do {
+                media.warmUp()
                 try await transcriber.prepare()
                 self?.finishPreparing()
                 await self?.refreshLanguages()

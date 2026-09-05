@@ -2,7 +2,7 @@ import AVFAudio
 import Foundation
 import os
 
-/// The state machine. Knows no frameworks — only the five ports.
+/// The state machine. Knows no frameworks — only the six ports.
 ///
 /// Key held → microphone on, audio streams into the transcriber. Released →
 /// microphone off, the stream ends, the result gets formatted and injected.
@@ -23,6 +23,10 @@ public final class DictationSession {
     public private(set) var state: DictationState = .idle {
         didSet {
             guard state != oldValue else { return }
+            // Every way out of `recording` ends the reason to keep the music
+            // down — release, error, watchdog, shutdown. One place instead of
+            // five, so no path can forget it.
+            if oldValue == .recording { resumeMedia(media) }
             armWatchdog()
             onStateChange?(state)
         }
@@ -41,6 +45,7 @@ public final class DictationSession {
     private let transcriber: any Transcribing
     private let formatter: any TextFormatting
     private let injector: any TextInjecting
+    private let media: any MediaPlaybackControlling
     /// Passed in at construction rather than set later: the display drops band
     /// arrays of unexpected length, and forgetting to set it would be a silently
     /// dead meter.
@@ -58,6 +63,7 @@ public final class DictationSession {
         transcriber: any Transcribing,
         formatter: any TextFormatting,
         injector: any TextInjecting,
+        media: any MediaPlaybackControlling,
         spectrumBandCount: Int
     ) {
         self.hotkey = hotkey
@@ -65,6 +71,7 @@ public final class DictationSession {
         self.transcriber = transcriber
         self.formatter = formatter
         self.injector = injector
+        self.media = media
         self.spectrumBandCount = spectrumBandCount
     }
 
@@ -100,6 +107,10 @@ public final class DictationSession {
         dictationTask?.cancel()
         audio.stop()
         hotkey.stop()
+        // Synchronous here on purpose: on quit a detached task may never run,
+        // and the music would stay paused with no one left to resume it. No
+        // waiting for the audio route either — there is no time for it.
+        media.resumeAfterDictation(waitingForRoute: false)
         state = .idle
     }
 
@@ -109,6 +120,9 @@ public final class DictationSession {
         let generation = self.generation
         state = .recording
         Self.log.info("begin() generation=\(generation, privacy: .public)")
+        // Before the microphone opens: with Bluetooth headsets the switch to the
+        // low-quality call mode then happens while nothing is audible anyway.
+        pauseMedia(media)
 
         dictationTask = Task { [audio, transcriber, formatter, injector] in
             do {
@@ -217,6 +231,17 @@ public final class DictationSession {
     /// once the engine stops.
     private nonisolated func closeMicrophone(_ audio: any AudioCapturing) {
         Task.detached { audio.stop() }
+    }
+
+    /// Also off the main thread: asking CoreAudio whether anything is playing
+    /// costs tens of milliseconds on the first call, and a stalled main thread
+    /// costs Roger its event tap.
+    private nonisolated func pauseMedia(_ media: any MediaPlaybackControlling) {
+        Task.detached { media.pauseForDictation() }
+    }
+
+    private nonisolated func resumeMedia(_ media: any MediaPlaybackControlling) {
+        Task.detached { media.resumeAfterDictation(waitingForRoute: true) }
     }
 
     private func fail(with error: any Error, generation: Int) async {
