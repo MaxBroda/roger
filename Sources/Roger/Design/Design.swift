@@ -142,7 +142,9 @@ public extension Design {
 
     /// No springs, no bounce — equipment indicates, it does not animate.
     enum Motion {
-        public static let meter = Animation.easeInOut(duration: 0.09)
+        /// Linear and a touch longer than the 33 ms between analyses: the bars
+        /// glide from step to step instead of snapping and easing on every one.
+        public static let meter = Animation.linear(duration: 0.11)
         public static let indicate = Animation.easeInOut(duration: 0.15)
         public static let blinkPeriod: Double = 1.5
     }

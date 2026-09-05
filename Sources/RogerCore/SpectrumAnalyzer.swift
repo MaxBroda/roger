@@ -16,18 +16,22 @@ public final class SpectrumAnalyzer {
     private static let curve: Float = 0.62
 
     /// Levels rise fast and fall back slowly — without the afterglow the display
-    /// flickers, with too much it feels sluggish.
-    private static let decay: Float = 0.76
+    /// flickers, with too much it feels sluggish. At 0.88 a bar takes about
+    /// 260 ms to fall back to a third: speech runs at four to seven syllables a
+    /// second, and a faster fall makes the bars read as fast-forwarded.
+    private static let decay: Float = 0.88
     /// Weight of the previous level on the way up. Not zero, because a headset
     /// mic rides its own automatic gain: single-frame spikes would snap the bar
-    /// to full height. At 0.45 a bar still reaches nine tenths of a step within
-    /// three analyses, about 60 ms — an onset still reads as immediate.
-    private static let attack: Float = 0.45
+    /// to full height. At 0.55 a bar still reaches nine tenths of a step within
+    /// about 80 ms — an onset still reads as immediate.
+    private static let attack: Float = 0.55
 
     /// Analyses per second. Chunk sizes differ per device — the built-in mic
     /// delivers 10 ms, a Bluetooth headset 20 ms — and without a fixed rate the
     /// bars would rise and decay at the speed of whatever device is recording.
-    private static let framesPerSecond: Double = 50
+    /// Thirty is above what the eye resolves as separate steps and leaves each
+    /// step long enough to be seen.
+    private static let framesPerSecond: Double = 30
 
     private let fftSize: Int
     private let fft: vDSP.FFT<DSPSplitComplex>
