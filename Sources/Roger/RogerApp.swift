@@ -29,6 +29,8 @@ public final class RogerApp {
     /// Which input device the microphone capture will pin at the next start.
     /// Mirrors the persisted preference so SwiftUI observes changes.
     private(set) var inputDeviceSelection: InputDeviceSelection
+    /// Whether a dictation silences whatever is playing for its duration.
+    private(set) var pausesMusicWhileDictating: Bool
 
     let dictionary: DictionaryStore
     let history: HistoryStore
@@ -70,6 +72,7 @@ public final class RogerApp {
         self.hotkey = hotkeyPreference.binding
         self.isMenuBarOnly = menuBarModePreference.isMenuBarOnly
         self.inputDeviceSelection = inputDevicePreference.selection
+        self.pausesMusicWhileDictating = musicPausePreference.pausesMusic
         observeWake()
     }
 
@@ -274,6 +277,14 @@ public final class RogerApp {
         inputDevicePreference.store(selection)
         inputDeviceSelection = selection
         onStatusChange?()
+    }
+
+    /// Read fresh at the start of every dictation, so switching this takes
+    /// effect on the next press — like the input device above.
+    func setPausesMusicWhileDictating(_ pausesMusic: Bool) {
+        guard pausesMusic != pausesMusicWhileDictating else { return }
+        musicPausePreference.store(pausesMusic)
+        pausesMusicWhileDictating = pausesMusic
     }
 
     /// Every input device macOS currently exposes. Read on demand from

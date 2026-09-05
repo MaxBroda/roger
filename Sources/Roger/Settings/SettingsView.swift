@@ -184,6 +184,21 @@ struct SettingsView: View {
                     .foregroundStyle(Design.Palette.textDim)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, Design.Space.xs)
+
+                FieldDivider()
+                    .padding(.vertical, Design.Space.xs)
+
+                FieldCheckbox(
+                    isOn: .init(
+                        get: { app.pausesMusicWhileDictating },
+                        set: { app.setPausesMusicWhileDictating($0) }
+                    ),
+                    label: "Musik während der Aufnahme pausieren"
+                )
+                Text(musicPauseExplanation)
+                    .textStyle(Design.Typography.timestamp)
+                    .foregroundStyle(Design.Palette.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -242,6 +257,16 @@ struct SettingsView: View {
         Bluetooth-Kopfhörer schalten beim Aufnehmen auf einen Mono-Modus mit \
         geringer Qualität. Für das Diktat empfehlen wir das eingebaute \
         Mikrofon; die Musik bleibt in voller Qualität auf den Kopfhörern.
+        """
+    }
+
+    private var musicPauseExplanation: String {
+        """
+        Beim Drücken geht ein Pause-Befehl an das, was gerade läuft, beim \
+        Loslassen ein Play. Ist nichts zu hören, passiert nichts. Erreicht wird, \
+        was sich bei der Mediensteuerung von macOS anmeldet — Musik, Spotify, \
+        Videos im Browser. Mit Bluetooth-Kopfhörern fällt so der \
+        Qualitätswechsel zum Aufnahmestart nicht auf.
         """
     }
 
