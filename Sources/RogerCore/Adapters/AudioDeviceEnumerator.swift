@@ -6,6 +6,12 @@ import Foundation
 /// Kept as a small stateless facade so `MicrophoneCapture` and the settings UI
 /// call the same code path. All CoreAudio primitive-buffer handling stays here.
 public enum AudioDeviceEnumerator {
+    /// Where sound currently goes, and at which rate.
+    public struct OutputRoute: Equatable, Sendable {
+        public let deviceID: AudioDeviceID
+        public let sampleRate: Double
+    }
+
     /// Every device that has at least one input stream (i.e. can capture audio).
     /// The list mirrors what macOS shows under System Settings › Sound › Input.
     public static func inputDevices() -> [InputDevice] {
@@ -34,6 +40,50 @@ public enum AudioDeviceEnumerator {
         case .explicit(let uid):
             return inputDevices().first { $0.uid == uid }
         }
+    }
+
+    /// Whether anything is currently playing audio out of the default output
+    /// device. CoreAudio answers this for the device as a whole, so it says
+    /// "sound is coming out", not "a music player is running" — a video call or
+    /// a system alert counts too.
+    ///
+    /// The device ID is looked up every time on purpose: plugging in headphones
+    /// moves the default output, and a cached ID would then report on the wrong
+    /// device.
+    public static func isDefaultOutputActive() -> Bool {
+        guard let id = defaultOutputDeviceID() else { return false }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else {
+            return false
+        }
+        return value != 0
+    }
+
+    /// The default output device and the rate it currently runs at.
+    ///
+    /// The rate is the tell for a Bluetooth headset's mode: playing music it
+    /// runs at 48 kHz, and while Roger holds the microphone the link drops to
+    /// the call codec at 24 kHz. Coming back takes about two seconds *after*
+    /// the microphone is closed — long enough to hear.
+    public static func defaultOutputRoute() -> OutputRoute? {
+        guard let id = defaultOutputDeviceID() else { return nil }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var rate: Double = 0
+        var size = UInt32(MemoryLayout<Double>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &rate) == noErr, rate > 0 else {
+            return nil
+        }
+        return OutputRoute(deviceID: id, sampleRate: rate)
     }
 
     // MARK: - CoreAudio plumbing
@@ -72,6 +122,25 @@ public enum AudioDeviceEnumerator {
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceID
+        )
+        return (status == noErr && deviceID != 0) ? deviceID : nil
+    }
+
+    private static func defaultOutputDeviceID() -> AudioDeviceID? {
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
