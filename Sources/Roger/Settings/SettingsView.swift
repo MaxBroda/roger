@@ -178,6 +178,10 @@ struct SettingsView: View {
                         action: { app.selectInputDevice(.explicit(uid: device.uid)) }
                     )
                 }
+                if case .explicit(let uid) = selection,
+                   !devices.contains(where: { $0.uid == uid }) {
+                    missingDeviceNotice
+                }
 
                 Text(microphoneExplanation)
                     .textStyle(Design.Typography.timestamp)
@@ -246,6 +250,21 @@ struct SettingsView: View {
         case .virtual: return "Virtuell"
         case .unknown: return "Sonstige"
         }
+    }
+
+    /// A pinned device that is not connected has no row to be active on, so
+    /// without this the panel looks as if nothing were selected while Roger
+    /// records from somewhere else entirely.
+    private var missingDeviceNotice: some View {
+        let substitute = app.resolvedInputDevice()
+        return Text(
+            substitute.map { "Gewähltes Mikrofon ist nicht verbunden — Roger nimmt über \($0.device.name) auf. Die Auswahl bleibt erhalten." }
+                ?? "Gewähltes Mikrofon ist nicht verbunden."
+        )
+        .textStyle(Design.Typography.timestamp)
+        .foregroundStyle(Design.Palette.accentRed)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, Design.Space.xs)
     }
 
     private var bluetoothWarning: String {

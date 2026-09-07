@@ -293,6 +293,13 @@ public final class RogerApp {
         AudioDeviceEnumerator.inputDevices()
     }
 
+    /// What the next dictation will record from — including the substitute when
+    /// the pinned device is not connected. Same code path the microphone uses,
+    /// so the settings panel cannot claim something else.
+    func resolvedInputDevice() -> ResolvedInputDevice? {
+        AudioDeviceEnumerator.resolve(inputDeviceSelection)
+    }
+
     /// One line, the same everywhere: menu bar, title bar, status field.
     var statusLine: String {
         if let downloadFraction {
