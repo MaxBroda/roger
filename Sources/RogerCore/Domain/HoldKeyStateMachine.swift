@@ -96,13 +96,12 @@ public struct HoldKeyStateMachine: Sendable {
         pendingReplays = 0
     }
 
-    /// Binds a different key. The tap stays up — it listens to all keys anyway.
+    /// Binds a different key. A dictation running on the old key has to end, or
+    /// its session never hears the release and the bubble stays up.
     public mutating func rebind(to newBinding: HotkeyBinding) -> [Effect] {
         guard newBinding != binding else { return [] }
         binding = newBinding
-        isKeyDown = false
-        isDictating = false
-        return [.cancelHoldTimer]
+        return interrupt()
     }
 
     /// For teardown: the caller closes the stream itself, so no `.pressEnded`.
