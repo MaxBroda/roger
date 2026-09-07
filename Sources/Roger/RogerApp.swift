@@ -272,9 +272,11 @@ public final class RogerApp {
     /// The user's persisted input-device choice. `MicrophoneCapture` re-reads
     /// this at the start of every dictation, so a change here takes effect on
     /// the next press — no stack restart needed.
-    func selectInputDevice(_ selection: InputDeviceSelection) {
+    /// `label` is what to call a pinned device while it is disconnected — the
+    /// UID alone tells the user nothing about which device they picked.
+    func selectInputDevice(_ selection: InputDeviceSelection, label: String? = nil) {
         guard selection != inputDeviceSelection else { return }
-        inputDevicePreference.store(selection)
+        inputDevicePreference.store(selection, label: label)
         inputDeviceSelection = selection
         onStatusChange?()
     }
@@ -298,6 +300,19 @@ public final class RogerApp {
     /// so the settings panel cannot claim something else.
     func resolvedInputDevice() -> ResolvedInputDevice? {
         AudioDeviceEnumerator.resolve(inputDeviceSelection)
+    }
+
+    /// The name a pinned device had when it was chosen, for the case that counts:
+    /// saying which device is missing.
+    var pinnedInputDeviceLabel: String? {
+        inputDevicePreference.pinnedLabel
+    }
+
+    /// What macOS records from by default. A Bluetooth headset here costs
+    /// playback quality as soon as *any* program opens it — worth saying, since
+    /// the setting is not Roger's and the effect looks like Roger's.
+    func systemDefaultInputDevice() -> InputDevice? {
+        AudioDeviceEnumerator.systemDefaultInputDevice()
     }
 
     /// One line, the same everywhere: menu bar, title bar, status field.
