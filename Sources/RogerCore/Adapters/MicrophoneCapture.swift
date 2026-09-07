@@ -139,12 +139,17 @@ public final class MicrophoneCapture: NSObject, AudioCapturing, @unchecked Senda
     /// is CoreAudio's device UID, the very string the preference persists, so
     /// both identify the same device without a lookup table.
     private func captureDevice(for selection: InputDeviceSelection) throws -> AVCaptureDevice {
-        if let device = AudioDeviceEnumerator.resolve(selection),
-           let capture = AVCaptureDevice(uniqueID: device.uid) {
+        if let resolved = AudioDeviceEnumerator.resolve(selection),
+           let capture = AVCaptureDevice(uniqueID: resolved.device.uid) {
+            if resolved.isSubstitute {
+                Self.log.notice(
+                    "pinned input device not connected for selection \(String(describing: selection), privacy: .public) — recording from \(resolved.device.name, privacy: .public) instead."
+                )
+            }
             return capture
         }
         Self.log.notice(
-            "preferred input device not available for selection \(String(describing: selection), privacy: .public) — falling back to system default."
+            "no input device for selection \(String(describing: selection), privacy: .public) — falling back to the system default."
         )
         guard let fallback = AVCaptureDevice.default(for: .audio) else {
             throw RogerError.audioEngineUnavailable(reason: "Kein Eingabegerät verfügbar.")

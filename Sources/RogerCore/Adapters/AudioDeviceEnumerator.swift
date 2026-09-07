@@ -24,22 +24,50 @@ public enum AudioDeviceEnumerator {
         return inputDevice(for: id)
     }
 
-    /// The device matching a persisted selection. Returns `nil` if the pinned
-    /// device is currently unplugged — callers should fall back to
-    /// ``systemDefaultInputDevice()`` in that case.
-    public static func resolve(_ selection: InputDeviceSelection) -> InputDevice? {
+    /// The device a persisted selection points at, or a substitute when it is
+    /// not connected. `nil` only if CoreAudio offers no input device at all.
+    public static func resolve(_ selection: InputDeviceSelection) -> ResolvedInputDevice? {
+        resolve(selection, available: inputDevices(), systemDefault: systemDefaultInputDevice())
+    }
+
+    /// The decision itself, without CoreAudio: which device wins, and whether
+    /// that is the user's choice or a stand-in. Separated so the rule that keeps
+    /// dictation off Bluetooth microphones is covered by tests rather than by
+    /// whichever devices happen to be plugged in.
+    public static func resolve(
+        _ selection: InputDeviceSelection,
+        available: [InputDevice],
+        systemDefault: InputDevice?
+    ) -> ResolvedInputDevice? {
         switch selection {
         case .automatic:
-            return systemDefaultInputDevice()
+            return systemDefault.map { ResolvedInputDevice(device: $0, isSubstitute: false) }
         case .builtIn:
-            // Continuity mics (iPhone / iPad / Watch) are reclassified to
-            // `.continuity` in `inputDevice(for:)`, so the built-in filter
-            // matches only actual Mac microphones.
-            return inputDevices().first { $0.transport == .builtIn }
-                ?? systemDefaultInputDevice()
+            if let builtIn = builtIn(in: available) {
+                return ResolvedInputDevice(device: builtIn, isSubstitute: false)
+            }
+            // No built-in microphone at all (Mac Pro, external-only setups):
+            // the system default is the only choice, not a lost setting.
+            return systemDefault.map { ResolvedInputDevice(device: $0, isSubstitute: false) }
         case .explicit(let uid):
-            return inputDevices().first { $0.uid == uid }
+            if let pinned = available.first(where: { $0.uid == uid }) {
+                return ResolvedInputDevice(device: pinned, isSubstitute: false)
+            }
+            // Built-in before the system default: with a headset connected the
+            // system default *is* the headset, so falling back there put the
+            // dictation on the very device this setting exists to avoid — and
+            // left the headset in hands-free mono afterwards.
+            if let builtIn = builtIn(in: available) {
+                return ResolvedInputDevice(device: builtIn, isSubstitute: true)
+            }
+            return systemDefault.map { ResolvedInputDevice(device: $0, isSubstitute: true) }
         }
+    }
+
+    /// Continuity mics (iPhone / iPad / Watch) are reclassified to `.continuity`
+    /// in ``inputDevice(for:)``, so this matches only actual Mac microphones.
+    private static func builtIn(in devices: [InputDevice]) -> InputDevice? {
+        devices.first { $0.transport == .builtIn }
     }
 
     /// Whether anything is currently playing audio out of the default output
