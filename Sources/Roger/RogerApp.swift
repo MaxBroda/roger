@@ -46,7 +46,7 @@ public final class RogerApp {
     /// The menu bar message goes away again — stack failures also belong in the
     /// system log.
     private static let log = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "de.mbr.roger",
+        subsystem: Bundle.main.bundleIdentifier ?? "com.mbr.roger",
         category: "dictation"
     )
 
