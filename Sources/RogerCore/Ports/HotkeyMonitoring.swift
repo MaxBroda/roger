@@ -1,4 +1,4 @@
-public enum HotkeyEvent: Sendable {
+public enum HotkeyEvent: Equatable, Sendable {
     case pressBegan
     case pressEnded
 }
