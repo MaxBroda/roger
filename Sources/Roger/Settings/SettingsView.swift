@@ -175,13 +175,14 @@ struct SettingsView: View {
                         detail: transportLabel(for: device),
                         warning: device.transport == .bluetooth ? bluetoothWarning : nil,
                         isActive: selection == .explicit(uid: device.uid),
-                        action: { app.selectInputDevice(.explicit(uid: device.uid)) }
+                        action: { app.selectInputDevice(.explicit(uid: device.uid), label: device.name) }
                     )
                 }
                 if case .explicit(let uid) = selection,
                    !devices.contains(where: { $0.uid == uid }) {
                     missingDeviceNotice
                 }
+                systemInputHint
 
                 Text(microphoneExplanation)
                     .textStyle(Design.Typography.timestamp)
@@ -254,17 +255,43 @@ struct SettingsView: View {
 
     /// A pinned device that is not connected has no row to be active on, so
     /// without this the panel looks as if nothing were selected while Roger
-    /// records from somewhere else entirely.
+    /// records from somewhere else entirely. Named, because a UID tells the user
+    /// nothing about which device they once picked.
     private var missingDeviceNotice: some View {
+        let missing = app.pinnedInputDeviceLabel ?? "Gewähltes Mikrofon"
         let substitute = app.resolvedInputDevice()
         return Text(
-            substitute.map { "Gewähltes Mikrofon ist nicht verbunden — Roger nimmt über \($0.device.name) auf. Die Auswahl bleibt erhalten." }
-                ?? "Gewähltes Mikrofon ist nicht verbunden."
+            substitute.map { "\(missing) ist nicht verbunden — Roger nimmt über \($0.device.name) auf. Die Auswahl bleibt erhalten." }
+                ?? "\(missing) ist nicht verbunden."
         )
         .textStyle(Design.Typography.timestamp)
         .foregroundStyle(Design.Palette.accentRed)
         .fixedSize(horizontal: false, vertical: true)
         .padding(.top, Design.Space.xs)
+    }
+
+    /// The effect that looks like Roger's fault and is not: a Bluetooth headset
+    /// as the *system* input drops playback to mono the moment any program opens
+    /// it — the Sound pane's own level meter is enough. Shown only when Roger
+    /// itself records from somewhere else, so it explains rather than accuses.
+    @ViewBuilder
+    private var systemInputHint: some View {
+        if let systemDefault = app.systemDefaultInputDevice(),
+           systemDefault.transport == .bluetooth,
+           app.resolvedInputDevice()?.device.uid != systemDefault.uid {
+            Text(
+                """
+                Hinweis: Als System-Eingang ist \(systemDefault.name) eingestellt. \
+                Sobald irgendein Programm dieses Mikrofon öffnet, schaltet das \
+                Headset auf Mono — Roger tut das nicht, es nimmt über das \
+                gewählte Gerät oben auf.
+                """
+            )
+            .textStyle(Design.Typography.timestamp)
+            .foregroundStyle(Design.Palette.textDim)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, Design.Space.xs)
+        }
     }
 
     private var bluetoothWarning: String {
