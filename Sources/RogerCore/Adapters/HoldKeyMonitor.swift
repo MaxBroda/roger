@@ -18,7 +18,9 @@ public final class HoldKeyMonitor: HotkeyMonitoring, @unchecked Sendable {
     /// Marks events we posted ourselves.
     private static let syntheticMarker: Int64 = 0x524F_4745  // "ROGE"
 
-    private var binding: HotkeyBinding
+    /// The rules live here, testable without a tap. This class only translates
+    /// `CGEvent` into inputs and effects back into CoreGraphics calls.
+    private var machine: HoldKeyStateMachine
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -27,24 +29,16 @@ public final class HoldKeyMonitor: HotkeyMonitoring, @unchecked Sendable {
     private var tapContext: Unmanaged<HoldKeyMonitor>?
     private var continuation: AsyncStream<HotkeyEvent>.Continuation?
     private var holdTimer: DispatchSourceTimer?
-
-    private var isKeyDown = false
-    private var isDictating = false
-    private var pendingReplays = 0
     private var replayResetTimer: DispatchSourceTimer?
 
     public init(binding: HotkeyBinding = .escHold) {
-        self.binding = binding
+        self.machine = HoldKeyStateMachine(binding: binding)
     }
 
     /// Binds a different key. The tap stays up — it listens to all keys anyway,
     /// and rebuilding it would only trigger the TCC check again.
     public func rebind(to newBinding: HotkeyBinding) {
-        guard newBinding != binding else { return }
-        cancelHoldTimer()
-        isKeyDown = false
-        isDictating = false
-        binding = newBinding
+        apply(machine.rebind(to: newBinding))
     }
 
     public func start() throws -> AsyncStream<HotkeyEvent> {
@@ -91,7 +85,6 @@ public final class HoldKeyMonitor: HotkeyMonitoring, @unchecked Sendable {
         cancelHoldTimer()
         replayResetTimer?.cancel()
         replayResetTimer = nil
-        pendingReplays = 0
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
             CFMachPortInvalidate(tap)
@@ -104,77 +97,65 @@ public final class HoldKeyMonitor: HotkeyMonitoring, @unchecked Sendable {
         // Only after the tap is gone can no callback reach this pointer.
         tapContext?.release()
         tapContext = nil
-        isKeyDown = false
-        isDictating = false
+        machine.reset()
         continuation?.finish()
         continuation = nil
     }
 
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        // When the system disables the tap, every event during the stall is lost —
-        // a keyUp included. Give up the state instead of staying open forever.
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-            resetAfterInterruption()
-            return Unmanaged.passUnretained(event)
-        }
-
-        let keyCode = UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
-        guard keyCode == binding.keyCode else { return Unmanaged.passUnretained(event) }
-
-        // Let our own replayed events through. The counter is the belt in case the
-        // marker gets lost — otherwise it loops forever.
-        if event.getIntegerValueField(.eventSourceUserData) == Self.syntheticMarker
-            || pendingReplays > 0 {
-            pendingReplays = max(0, pendingReplays - 1)
-            return Unmanaged.passUnretained(event)
-        }
-
+        let input: HoldKeyStateMachine.Input
         switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            input = .tapDisabled
         case .keyDown:
-            let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-            if !isAutorepeat, !isKeyDown {
-                isKeyDown = true
-                startHoldTimer()
-            }
-            return nil
-
+            input = .keyDown(
+                keyCode: keyCode(of: event),
+                isAutorepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0,
+                isSynthetic: isSynthetic(event)
+            )
         case .keyUp:
-            isKeyDown = false
-            cancelHoldTimer()
-            if isDictating {
-                isDictating = false
-                continuation?.yield(.pressEnded)
-            } else if binding.replaysShortPress {
-                replayShortPress()
-            }
-            return nil
-
+            input = .keyUp(keyCode: keyCode(of: event), isSynthetic: isSynthetic(event))
         default:
             return Unmanaged.passUnretained(event)
         }
+
+        let decision = machine.handle(input)
+        apply(decision.effects)
+        return decision.passesThrough ? Unmanaged.passUnretained(event) : nil
     }
 
-    /// Cleans up after the tap was disabled: a recording whose keyUp was lost in
-    /// the gap would never end.
-    private func resetAfterInterruption() {
-        cancelHoldTimer()
-        isKeyDown = false
-        pendingReplays = 0
-        if isDictating {
-            isDictating = false
-            continuation?.yield(.pressEnded)
+    private func apply(_ effects: [HoldKeyStateMachine.Effect]) {
+        for effect in effects {
+            switch effect {
+            case .reEnableTap:
+                if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            case .startHoldTimer:
+                startHoldTimer()
+            case .cancelHoldTimer:
+                cancelHoldTimer()
+            case .replayShortPress:
+                replayShortPress()
+            case .emit(let hotkeyEvent):
+                continuation?.yield(hotkeyEvent)
+            }
         }
+    }
+
+    private func keyCode(of event: CGEvent) -> UInt16 {
+        UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
+    }
+
+    private func isSynthetic(_ event: CGEvent) -> Bool {
+        event.getIntegerValueField(.eventSourceUserData) == Self.syntheticMarker
     }
 
     private func startHoldTimer() {
         cancelHoldTimer()
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + binding.holdThreshold.timeInterval)
+        timer.schedule(deadline: .now() + machine.holdThreshold.timeInterval)
         timer.setEventHandler { [weak self] in
-            guard let self, self.isKeyDown, !self.isDictating else { return }
-            self.isDictating = true
-            self.continuation?.yield(.pressBegan)
+            guard let self, let effect = self.machine.holdThresholdElapsed() else { return }
+            self.apply([effect])
         }
         timer.resume()
         holdTimer = timer
@@ -199,11 +180,11 @@ public final class HoldKeyMonitor: HotkeyMonitoring, @unchecked Sendable {
         for isDown in [true, false] {
             guard let event = CGEvent(
                 keyboardEventSource: source,
-                virtualKey: binding.keyCode,
+                virtualKey: machine.keyCode,
                 keyDown: isDown
             ) else { continue }
             event.setIntegerValueField(.eventSourceUserData, value: Self.syntheticMarker)
-            pendingReplays += 1
+            machine.expectReplay()
             posted += 1
             event.post(tap: .cghidEventTap)
         }
@@ -217,7 +198,7 @@ public final class HoldKeyMonitor: HotkeyMonitoring, @unchecked Sendable {
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + 0.25)
         timer.setEventHandler { [weak self] in
-            self?.pendingReplays = 0
+            self?.machine.replayResetElapsed()
         }
         timer.resume()
         replayResetTimer = timer
