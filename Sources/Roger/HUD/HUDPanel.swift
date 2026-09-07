@@ -1,6 +1,7 @@
 import AppKit
 import RogerCore
 import SwiftUI
+import os
 
 /// The floating window the HUD lives in. What matters is what it does *not* do:
 /// take focus — Roger pastes into the frontmost app with ⌘V.
@@ -16,6 +17,21 @@ final class HUDPanel {
         /// from `visibleFrame`, so the bubble does not hide behind the Dock.
         static let bottomInset: CGFloat = 66
     }
+
+    /// Set again on every show, not once in `init`: macOS reads the behaviour
+    /// while a window is being ordered in and ignores it afterwards, so a panel
+    /// that lost `canJoinAllSpaces` cannot be repaired by assigning it again.
+    private static let collectionBehavior: NSWindow.CollectionBehavior = [
+        .canJoinAllSpaces,
+        .stationary,
+        .fullScreenAuxiliary,
+        .ignoresCycle,
+    ]
+
+    private static let log = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.mbr.roger",
+        category: "hud"
+    )
 
     private let model = HUDModel()
     private let panel: NSPanel
@@ -39,18 +55,14 @@ final class HUDPanel {
         panel.isMovable = false
         panel.hidesOnDeactivate = false
         panel.level = .statusBar
-        panel.collectionBehavior = [
-            .canJoinAllSpaces,
-            .stationary,
-            .fullScreenAuxiliary,
-            .ignoresCycle,
-        ]
+        panel.collectionBehavior = Self.collectionBehavior
     }
 
     func render(_ state: DictationState) {
+        let wasVisible = model.isVisible
         model.update(state)
         if model.isVisible {
-            expand()
+            expand(comingUp: !wasVisible)
         } else {
             collapse()
         }
@@ -60,24 +72,42 @@ final class HUDPanel {
         model.update(bands: bands)
     }
 
-    private func expand() {
+    private func expand(comingUp: Bool) {
         dismissTask?.cancel()
         dismissTask = nil
 
-        if !panel.isVisible {
-            reposition()
-            // Become visible without activating the app in front of it.
-            panel.orderFrontRegardless()
+        // `isVisible` alone would not catch this: a panel left behind on a Space
+        // the user has switched away from still reports itself as visible, so the
+        // bubble expanded and animated on a desktop nobody was looking at while
+        // the dictation ran — and never came back until Roger was restarted.
+        if comingUp || !panel.isOnActiveSpace {
+            if !comingUp {
+                Self.log.error("HUD panel was off the active space while visible — ordering it in again.")
+            }
+            show()
         }
         // No `withAnimation`: the bubble carries its own motion per direction and
         // axis, and one from outside would override all four.
         model.setExpanded(true)
     }
 
-    private func collapse() {
-        guard panel.isVisible else { return }
+    /// Out before in, every time. Two reasons, both measured: the collection
+    /// behaviour above only takes effect while the window is being ordered in,
+    /// and ordering a panel front that sits on another Space drags the whole
+    /// desktop over to it instead of bringing the bubble here.
+    private func show() {
+        panel.orderOut(nil)
+        panel.collectionBehavior = Self.collectionBehavior
+        reposition()
+        // Become visible without activating the app in front of it.
+        panel.orderFrontRegardless()
+    }
 
+    private func collapse() {
+        // Before the `isVisible` check: an ordered-out panel would otherwise keep
+        // `isExpanded` set, and the next bubble would come up without its motion.
         model.setExpanded(false)
+        guard panel.isVisible else { return }
 
         // Only after the motion, and only if no new dictation started meanwhile.
         dismissTask = Task { [weak self] in
@@ -88,7 +118,9 @@ final class HUDPanel {
     }
 
     private func reposition() {
-        guard let screen = NSScreen.main else { return }
+        // No early return without a screen: keeping the old frame is how the
+        // bubble ends up drawing onto a display that is no longer there.
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let visible = screen.visibleFrame
         panel.setFrameOrigin(
             NSPoint(
