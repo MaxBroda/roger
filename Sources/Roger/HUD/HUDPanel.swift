@@ -37,6 +37,7 @@ final class HUDPanel {
     private let panel: NSPanel
 
     private var dismissTask: Task<Void, Never>?
+    private var verifyTask: Task<Void, Never>?
 
     init() {
         let hostingView = NSHostingView(rootView: DictationHUDView(model: model))
@@ -101,9 +102,33 @@ final class HUDPanel {
         reposition()
         // Become visible without activating the app in front of it.
         panel.orderFrontRegardless()
+        verify()
+    }
+
+    /// The tripwire for the next time the bubble stays away: this is the one
+    /// failure the user cannot see, because Roger keeps recording either way.
+    /// Delayed on purpose — the Space assignment settles a moment after ordering
+    /// in, so checking right away would report every healthy dictation.
+    private func verify() {
+        verifyTask?.cancel()
+        verifyTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, !Task.isCancelled, self.model.isVisible else { return }
+            guard !self.panel.isOnActiveSpace || !self.panel.isVisible else { return }
+            Self.log.error(
+                """
+                HUD panel invisible while dictating: \
+                isVisible=\(self.panel.isVisible, privacy: .public) \
+                isOnActiveSpace=\(self.panel.isOnActiveSpace, privacy: .public) \
+                frame=\(NSStringFromRect(self.panel.frame), privacy: .public)
+                """
+            )
+        }
     }
 
     private func collapse() {
+        verifyTask?.cancel()
+        verifyTask = nil
         // Before the `isVisible` check: an ordered-out panel would otherwise keep
         // `isExpanded` set, and the next bubble would come up without its motion.
         model.setExpanded(false)
