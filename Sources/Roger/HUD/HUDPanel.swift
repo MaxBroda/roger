@@ -18,9 +18,6 @@ final class HUDPanel {
         static let bottomInset: CGFloat = 66
     }
 
-    /// Set again on every show, not once in `init`: macOS reads the behaviour
-    /// while a window is being ordered in and ignores it afterwards, so a panel
-    /// that lost `canJoinAllSpaces` cannot be repaired by assigning it again.
     private static let collectionBehavior: NSWindow.CollectionBehavior = [
         .canJoinAllSpaces,
         .stationary,
@@ -34,30 +31,11 @@ final class HUDPanel {
     )
 
     private let model = HUDModel()
-    private let panel: NSPanel
+    /// Built fresh for every bubble and dropped afterwards — see ``show()``.
+    private var panel: NSPanel?
 
     private var dismissTask: Task<Void, Never>?
     private var verifyTask: Task<Void, Never>?
-
-    init() {
-        let hostingView = NSHostingView(rootView: DictationHUDView(model: model))
-
-        panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: Metrics.width, height: Metrics.height),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.contentView = hostingView
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.ignoresMouseEvents = true
-        panel.isMovable = false
-        panel.hidesOnDeactivate = false
-        panel.level = .statusBar
-        panel.collectionBehavior = Self.collectionBehavior
-    }
 
     func render(_ state: DictationState) {
         let wasVisible = model.isVisible
@@ -77,13 +55,12 @@ final class HUDPanel {
         dismissTask?.cancel()
         dismissTask = nil
 
-        // `isVisible` alone would not catch this: a panel left behind on a Space
-        // the user has switched away from still reports itself as visible, so the
-        // bubble expanded and animated on a desktop nobody was looking at while
-        // the dictation ran — and never came back until Roger was restarted.
-        if comingUp || !panel.isOnActiveSpace {
+        // A panel left behind on a Space the user has switched away from still
+        // reports itself as visible, so the bubble expanded and animated on a
+        // desktop nobody was looking at while the dictation ran.
+        if comingUp || panel?.isOnActiveSpace != true {
             if !comingUp {
-                Self.log.error("HUD panel was off the active space while visible — ordering it in again.")
+                Self.log.error("HUD panel was off the active space while visible — rebuilding it.")
             }
             show()
         }
@@ -92,35 +69,70 @@ final class HUDPanel {
         model.setExpanded(true)
     }
 
-    /// Out before in, every time. Two reasons, both measured: the collection
-    /// behaviour above only takes effect while the window is being ordered in,
-    /// and ordering a panel front that sits on another Space drags the whole
-    /// desktop over to it instead of bringing the bubble here.
+    /// A new panel for every bubble, because a reused one cannot be repaired.
+    ///
+    /// Measured on 2026-09-08 with Chrome in full-screen: Roger's long-lived
+    /// panel was bound to `spaces=[1, 1329]` out of the display's
+    /// `[1, 3, 4, 5, 6, 1329]` — the binding of a window *without*
+    /// `.canJoinAllSpaces`, pinned to its birth Space and joining full-screen
+    /// Spaces only through `.fullScreenAuxiliary`. Ordering it out, re-assigning
+    /// the behaviour and ordering it back in did not restore it: the tripwire
+    /// logged `isOnActiveSpace=false` one second after exactly that sequence,
+    /// three dictations in a row.
+    ///
+    /// A freshly created panel gets all Spaces every time — proven for this flag
+    /// combination, without `.fullScreenAuxiliary`, without `.stationary`, at two
+    /// window levels and with an `NSHostingView` as content. So the window is
+    /// treated as disposable rather than trusted to keep a behaviour macOS reads
+    /// only once, at birth.
     private func show() {
-        panel.orderOut(nil)
-        panel.collectionBehavior = Self.collectionBehavior
-        reposition()
+        dismiss()
+        let panel = makePanel()
+        self.panel = panel
         // Become visible without activating the app in front of it.
         panel.orderFrontRegardless()
-        verify()
+        verify(panel)
+    }
+
+    private func makePanel() -> NSPanel {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: Metrics.width, height: Metrics.height),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentView = NSHostingView(rootView: DictationHUDView(model: model))
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.isMovable = false
+        panel.hidesOnDeactivate = false
+        // ARC owns the panel through `self.panel`; the AppKit-era release on
+        // close would over-release it.
+        panel.isReleasedWhenClosed = false
+        panel.level = .statusBar
+        panel.collectionBehavior = Self.collectionBehavior
+        panel.setFrameOrigin(origin())
+        return panel
     }
 
     /// The tripwire for the next time the bubble stays away: this is the one
     /// failure the user cannot see, because Roger keeps recording either way.
     /// Delayed on purpose — the Space assignment settles a moment after ordering
     /// in, so checking right away would report every healthy dictation.
-    private func verify() {
+    private func verify(_ panel: NSPanel) {
         verifyTask?.cancel()
         verifyTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
-            guard let self, !Task.isCancelled, self.model.isVisible else { return }
-            guard !self.panel.isOnActiveSpace || !self.panel.isVisible else { return }
+            guard let self, !Task.isCancelled, self.model.isVisible, self.panel === panel else { return }
+            guard !panel.isOnActiveSpace || !panel.isVisible else { return }
             Self.log.error(
                 """
                 HUD panel invisible while dictating: \
-                isVisible=\(self.panel.isVisible, privacy: .public) \
-                isOnActiveSpace=\(self.panel.isOnActiveSpace, privacy: .public) \
-                frame=\(NSStringFromRect(self.panel.frame), privacy: .public)
+                isVisible=\(panel.isVisible, privacy: .public) \
+                isOnActiveSpace=\(panel.isOnActiveSpace, privacy: .public) \
+                frame=\(NSStringFromRect(panel.frame), privacy: .public)
                 """
             )
         }
@@ -129,29 +141,32 @@ final class HUDPanel {
     private func collapse() {
         verifyTask?.cancel()
         verifyTask = nil
-        // Before the `isVisible` check: an ordered-out panel would otherwise keep
+        // Before the visibility check: an ordered-out panel would otherwise keep
         // `isExpanded` set, and the next bubble would come up without its motion.
         model.setExpanded(false)
-        guard panel.isVisible else { return }
+        guard panel != nil else { return }
 
         // Only after the motion, and only if no new dictation started meanwhile.
         dismissTask = Task { [weak self] in
             try? await Task.sleep(for: Design.Bubble.collapseDuration)
             guard let self, !Task.isCancelled, !self.model.isVisible else { return }
-            self.panel.orderOut(nil)
+            self.dismiss()
         }
     }
 
-    private func reposition() {
-        // No early return without a screen: keeping the old frame is how the
+    private func dismiss() {
+        panel?.orderOut(nil)
+        panel = nil
+    }
+
+    private func origin() -> NSPoint {
+        // No fallback to the old frame without a screen: keeping it is how the
         // bubble ends up drawing onto a display that is no longer there.
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return .zero }
         let visible = screen.visibleFrame
-        panel.setFrameOrigin(
-            NSPoint(
-                x: visible.midX - Metrics.width / 2,
-                y: visible.minY + Metrics.bottomInset - Metrics.height / 2
-            )
+        return NSPoint(
+            x: visible.midX - Metrics.width / 2,
+            y: visible.minY + Metrics.bottomInset - Metrics.height / 2
         )
     }
 }
