@@ -182,6 +182,9 @@ struct SettingsView: View {
                    !devices.contains(where: { $0.uid == uid }) {
                     missingDeviceNotice
                 }
+                if let dropped = app.droppedPinLabel {
+                    droppedPinNotice(dropped)
+                }
                 systemInputHint
 
                 Text(microphoneExplanation)
@@ -263,6 +266,22 @@ struct SettingsView: View {
         return Text(
             substitute.map { "\(missing) ist nicht verbunden — Roger nimmt über \($0.device.name) auf. Die Auswahl bleibt erhalten." }
                 ?? "\(missing) ist nicht verbunden."
+        )
+        .textStyle(Design.Typography.timestamp)
+        .foregroundStyle(Design.Palette.accentRed)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, Design.Space.xs)
+    }
+
+    /// A loopback device was pinned — from the outside that looked like Roger
+    /// being deaf, so the panel names the device rather than quietly moving the
+    /// setting.
+    private func droppedPinNotice(_ label: String) -> some View {
+        Text(
+            """
+            \(label) kann keine Stimme aufnehmen — es gibt nur weiter, was andere \
+            Programme abspielen. Roger nimmt wieder über das eingebaute Mikrofon auf.
+            """
         )
         .textStyle(Design.Typography.timestamp)
         .foregroundStyle(Design.Palette.accentRed)

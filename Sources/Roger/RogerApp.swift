@@ -31,6 +31,10 @@ public final class RogerApp {
     private(set) var inputDeviceSelection: InputDeviceSelection
     /// Whether a dictation silences whatever is playing for its duration.
     private(set) var pausesMusicWhileDictating: Bool
+    /// The pinned device Roger dropped at launch because a voice cannot reach
+    /// it. Kept so the settings panel can say what happened instead of showing
+    /// a setting that silently changed itself.
+    private(set) var droppedPinLabel: String?
 
     let dictionary: DictionaryStore
     let history: HistoryStore
@@ -73,7 +77,23 @@ public final class RogerApp {
         self.isMenuBarOnly = menuBarModePreference.isMenuBarOnly
         self.inputDeviceSelection = inputDevicePreference.selection
         self.pausesMusicWhileDictating = musicPausePreference.pausesMusic
+        dropPinThatCannotRecord()
         observeWake()
+    }
+
+    /// A pin stored before #34 can point at a loopback driver, and Roger would
+    /// record digital silence from it for as long as the pin stands. Dropped on
+    /// read — but only while the device is connected: an absent pin is a
+    /// legitimate wait for a microphone that comes back.
+    private func dropPinThatCannotRecord() {
+        guard case .explicit(let uid) = inputDeviceSelection,
+              let pinned = AudioDeviceEnumerator.inputDevices().first(where: { $0.uid == uid }),
+              !pinned.canCaptureVoice
+        else { return }
+        Self.log.info("Pinned input device \(pinned.name, privacy: .public) cannot capture a voice — falling back to the built-in microphone.")
+        droppedPinLabel = pinned.name
+        inputDevicePreference.store(.builtIn)
+        inputDeviceSelection = .builtIn
     }
 
     /// After sleep the CGEvent tap is often gone and the session died with it —
@@ -289,10 +309,11 @@ public final class RogerApp {
         pausesMusicWhileDictating = pausesMusic
     }
 
-    /// Every input device macOS currently exposes. Read on demand from
-    /// CoreAudio; the settings view calls this every time it opens.
+    /// Every input device a voice can reach. Read on demand from CoreAudio; the
+    /// settings view calls this every time it opens. Loopback drivers are left
+    /// out rather than offered and then punished — see ``InputDevice/canCaptureVoice``.
     func availableInputDevices() -> [InputDevice] {
-        AudioDeviceEnumerator.inputDevices()
+        AudioDeviceEnumerator.dictationDevices()
     }
 
     /// What the next dictation will record from — including the substitute when

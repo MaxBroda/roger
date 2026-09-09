@@ -34,6 +34,18 @@ public struct InputDevice: Equatable, Sendable, Identifiable {
         self.audioDeviceID = audioDeviceID
     }
 
+    /// Whether a voice can reach Roger through this device at all.
+    ///
+    /// A loopback driver (Teams Audio, BlackHole, Loopback) and an AirPlay
+    /// receiver carry what other programs *play*. Recording from one succeeds in
+    /// every measurable way — the device opens, buffers arrive on time — and
+    /// every sample is digital silence, which looks exactly like Roger being
+    /// broken. Aggregate devices stay usable on purpose: they routinely wrap a
+    /// real capsule.
+    public var canCaptureVoice: Bool {
+        transport != .virtual
+    }
+
     /// Bluetooth devices force AirPods into HFP mono, sacrificing audio playback
     /// quality and adding ~1 s of codec-switch latency at recording start. The
     /// UI marks these so users can pick built-in when both are available.
