@@ -13,9 +13,15 @@ public enum AudioDeviceEnumerator {
     }
 
     /// Every device that has at least one input stream (i.e. can capture audio).
-    /// The list mirrors what macOS shows under System Settings › Sound › Input.
+    /// The list mirrors what macOS shows under System Settings › Sound › Input,
+    /// loopback drivers included — ``dictationDevices()`` is the list to offer.
     public static func inputDevices() -> [InputDevice] {
         deviceIDs().compactMap(inputDevice(for:))
+    }
+
+    /// The devices a user may pin: everything a voice can actually reach.
+    public static func dictationDevices() -> [InputDevice] {
+        inputDevices().filter(\.canCaptureVoice)
     }
 
     /// The device currently set as macOS's default input.
@@ -41,6 +47,14 @@ public enum AudioDeviceEnumerator {
     ) -> ResolvedInputDevice? {
         switch selection {
         case .automatic:
+            // A loopback driver as the *system* input would hand Roger silence
+            // through a setting that is not even Roger's.
+            if let systemDefault, systemDefault.canCaptureVoice {
+                return ResolvedInputDevice(device: systemDefault, isSubstitute: false)
+            }
+            if let builtIn = builtIn(in: available) {
+                return ResolvedInputDevice(device: builtIn, isSubstitute: true)
+            }
             return systemDefault.map { ResolvedInputDevice(device: $0, isSubstitute: false) }
         case .builtIn:
             if let builtIn = builtIn(in: available) {
@@ -50,7 +64,9 @@ public enum AudioDeviceEnumerator {
             // the system default is the only choice, not a lost setting.
             return systemDefault.map { ResolvedInputDevice(device: $0, isSubstitute: false) }
         case .explicit(let uid):
-            if let pinned = available.first(where: { $0.uid == uid }) {
+            // Connected but unable to carry a voice counts as absent: recording
+            // from it is silence, and silence is worse than a substitution.
+            if let pinned = available.first(where: { $0.uid == uid }), pinned.canCaptureVoice {
                 return ResolvedInputDevice(device: pinned, isSubstitute: false)
             }
             // Built-in before the system default: with a headset connected the
