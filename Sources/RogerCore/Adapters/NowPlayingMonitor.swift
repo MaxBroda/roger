@@ -14,30 +14,20 @@ import os
 /// caused Roger to resume music nobody had started (issue #26); guessing
 /// "not playing" only risks not muting something, which is silent and
 /// recoverable.
-public struct NowPlayingMonitor: NowPlayingProbing {
+/// Runs the bundled script and returns its stdout, or `nil` if the process
+/// could not be launched, exited unsuccessfully, or timed out. Exists so
+/// ``NowPlayingMonitor`` can be tested without actually spawning `osascript`.
+protocol NowPlayingScriptRunning: Sendable {
+    func run(scriptURL: URL, timeout: TimeInterval) -> String?
+}
+
+struct OSAScriptRunner: NowPlayingScriptRunning {
     private static let log = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.mbr.roger",
         category: "media"
     )
 
-    private let scriptURL: URL?
-    private let timeout: TimeInterval
-
-    public init(bundle: Bundle = .main, timeout: TimeInterval = 0.3) {
-        self.scriptURL = bundle.url(forResource: "now-playing", withExtension: "js")
-        self.timeout = timeout
-    }
-
-    public func isPlaying() -> Bool {
-        guard let scriptURL else {
-            Self.log.error("now-playing.js is missing from the bundle — treating as nothing playing.")
-            return false
-        }
-        guard let output = run(scriptURL) else { return false }
-        return Self.parse(output)
-    }
-
-    private func run(_ scriptURL: URL) -> String? {
+    func run(scriptURL: URL, timeout: TimeInterval) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-l", "JavaScript", scriptURL.path]
@@ -64,6 +54,36 @@ public struct NowPlayingMonitor: NowPlayingProbing {
 
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8)
+    }
+}
+
+public struct NowPlayingMonitor: NowPlayingProbing {
+    private static let log = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.mbr.roger",
+        category: "media"
+    )
+
+    private let scriptURL: URL?
+    private let timeout: TimeInterval
+    private let runner: any NowPlayingScriptRunning
+
+    init(bundle: Bundle = .main, timeout: TimeInterval = 0.3, runner: any NowPlayingScriptRunning) {
+        self.scriptURL = bundle.url(forResource: "now-playing", withExtension: "js")
+        self.timeout = timeout
+        self.runner = runner
+    }
+
+    public init(bundle: Bundle = .main, timeout: TimeInterval = 0.3) {
+        self.init(bundle: bundle, timeout: timeout, runner: OSAScriptRunner())
+    }
+
+    public func isPlaying() -> Bool {
+        guard let scriptURL else {
+            Self.log.error("now-playing.js is missing from the bundle — treating as nothing playing.")
+            return false
+        }
+        guard let output = runner.run(scriptURL: scriptURL, timeout: timeout) else { return false }
+        return Self.parse(output)
     }
 
     /// The script's stdout is one JSON object, but only the *last* line counts
