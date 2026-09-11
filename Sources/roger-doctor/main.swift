@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 import RogerCore
 import Speech
 
@@ -44,3 +45,6 @@ for identifier in candidates {
 print("\nDeutsche Varianten unter den unterstützten Sprachen")
 let german = supported.filter { $0.identifier.hasPrefix("de") }
 print("  \(german.isEmpty ? "—" : german.map(\.identifier).joined(separator: ", "))\n")
+
+print("\nFoundation Models (Sprachmodell-Bereinigung, Beta)")
+line("availability", "\(SystemLanguageModel.default.availability)")
