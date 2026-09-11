@@ -7,6 +7,9 @@ import SwiftUI
 /// while Roger is frontmost.
 struct HotkeyRecorder: View {
     let keyCode: UInt16
+    /// The other hotkey's key code, if one exists — both monitors would
+    /// otherwise race over the same physical key press.
+    var excludedKeyCode: UInt16?
     let onCapture: (UInt16) -> Void
 
     @State private var isArmed = false
@@ -68,11 +71,16 @@ struct HotkeyRecorder: View {
 
     private func capture(_ event: NSEvent) {
         let code = event.keyCode
-        guard HotkeyBinding.isUsable(keyCode: code) else {
+        if let reason = HotkeyBinding.unusableReason(keyCode: code) {
+            rejected = rejectionMessage(for: reason, code: code)
+            disarm()
+            return
+        }
+        if let excludedKeyCode, code == excludedKeyCode {
             rejected = """
-                \(KeyNames.name(of: code)) lässt sich nicht belegen. Roger hält die \
-                Taste bis zum Ablauf der Haltezeit zurück — bei einer Schreibtaste \
-                wäre danach das Tippen kaputt.
+                \(KeyNames.name(of: code)) ist schon die andere Taste. Beide auf \
+                dieselbe Taste zu legen lässt die beiden Diktat-Modi um denselben \
+                Tastendruck konkurrieren.
                 """
             disarm()
             return
@@ -80,5 +88,21 @@ struct HotkeyRecorder: View {
         rejected = nil
         disarm()
         onCapture(code)
+    }
+
+    private func rejectionMessage(for reason: HotkeyBinding.UnusableReason, code: UInt16) -> String {
+        switch reason {
+        case .typingKey:
+            """
+            \(KeyNames.name(of: code)) lässt sich nicht belegen. Roger hält die \
+            Taste bis zum Ablauf der Haltezeit zurück — bei einer Schreibtaste \
+            wäre danach das Tippen kaputt.
+            """
+        case .modifierOnly:
+            """
+            \(KeyNames.name(of: code)) lässt sich nicht belegen. Für sich allein \
+            löst sie keinen Tastendruck aus und würde nie ein Diktat starten.
+            """
+        }
     }
 }
