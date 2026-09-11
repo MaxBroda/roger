@@ -55,13 +55,25 @@ public enum AudioDeviceEnumerator {
             if let builtIn = builtIn(in: available) {
                 return ResolvedInputDevice(device: builtIn, isSubstitute: true)
             }
+            // Neither the system default nor a built-in mic can carry a voice —
+            // an external mic that is merely not *the* default beats silence.
+            if let voiceCapable = available.first(where: \.canCaptureVoice) {
+                return ResolvedInputDevice(device: voiceCapable, isSubstitute: true)
+            }
             return systemDefault.map { ResolvedInputDevice(device: $0, isSubstitute: false) }
         case .builtIn:
             if let builtIn = builtIn(in: available) {
                 return ResolvedInputDevice(device: builtIn, isSubstitute: false)
             }
             // No built-in microphone at all (Mac Pro, external-only setups):
-            // the system default is the only choice, not a lost setting.
+            // the system default is the only choice, not a lost setting —
+            // unless it can't carry a voice, then an external mic beats silence.
+            if let systemDefault, systemDefault.canCaptureVoice {
+                return ResolvedInputDevice(device: systemDefault, isSubstitute: false)
+            }
+            if let voiceCapable = available.first(where: \.canCaptureVoice) {
+                return ResolvedInputDevice(device: voiceCapable, isSubstitute: true)
+            }
             return systemDefault.map { ResolvedInputDevice(device: $0, isSubstitute: false) }
         case .explicit(let uid):
             // Connected but unable to carry a voice counts as absent: recording
@@ -75,6 +87,12 @@ public enum AudioDeviceEnumerator {
             // left the headset in hands-free mono afterwards.
             if let builtIn = builtIn(in: available) {
                 return ResolvedInputDevice(device: builtIn, isSubstitute: true)
+            }
+            if let systemDefault, systemDefault.canCaptureVoice {
+                return ResolvedInputDevice(device: systemDefault, isSubstitute: true)
+            }
+            if let voiceCapable = available.first(where: \.canCaptureVoice) {
+                return ResolvedInputDevice(device: voiceCapable, isSubstitute: true)
             }
             return systemDefault.map { ResolvedInputDevice(device: $0, isSubstitute: true) }
         }
