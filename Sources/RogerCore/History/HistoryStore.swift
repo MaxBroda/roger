@@ -25,10 +25,11 @@ public final class HistoryStore {
     public var fileURL: URL { file.url }
 
     @discardableResult
-    public func append(_ result: FormattingResult) -> DictationRecord {
+    public func append(_ outcome: DictationOutcome) -> DictationRecord {
         let record = DictationRecord(
-            text: result.transcript.text,
-            corrections: result.corrections
+            text: outcome.polished.transcript.text,
+            rawText: outcome.mode == .llmCleanup ? outcome.raw.text : nil,
+            corrections: outcome.polished.corrections
         )
         records.insert(record, at: 0)
         if records.count > limit { records.removeLast(records.count - limit) }
