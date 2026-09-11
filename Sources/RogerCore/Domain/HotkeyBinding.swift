@@ -33,10 +33,23 @@ public struct HotkeyBinding: Equatable, Sendable {
     /// Shift, control, option, command (left and right), caps lock and fn.
     private static let modifierKeyCodes: Set<UInt16> = [54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
 
-    /// Letters and digits are excluded: bind `A` and every `A` waits out the hold
-    /// time afterwards.
+    public enum UnusableReason {
+        /// Letters and digits are excluded: bind `A` and every `A` waits out the
+        /// hold time afterwards.
+        case typingKey
+        /// A bare modifier only ever generates `flagsChanged`, never `keyDown`/
+        /// `keyUp` — the events `HoldKeyMonitor` actually watches for.
+        case modifierOnly
+    }
+
+    public static func unusableReason(keyCode: UInt16) -> UnusableReason? {
+        if typingKeyCodes.contains(keyCode) { return .typingKey }
+        if modifierKeyCodes.contains(keyCode) { return .modifierOnly }
+        return nil
+    }
+
     public static func isUsable(keyCode: UInt16) -> Bool {
-        !typingKeyCodes.contains(keyCode)
+        unusableReason(keyCode: keyCode) == nil
     }
 
     /// Letters, digits, punctuation, space, delete and return.

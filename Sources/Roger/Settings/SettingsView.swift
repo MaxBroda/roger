@@ -30,7 +30,10 @@ struct SettingsView: View {
     private var hotkeyPanel: some View {
         RecessedPanel("Push-to-Talk") {
             VStack(alignment: .leading, spacing: Design.Space.lg) {
-                HotkeyRecorder(keyCode: app.hotkey.keyCode) { code in
+                HotkeyRecorder(
+                    keyCode: app.hotkey.keyCode,
+                    excludedKeyCode: app.llmCleanupEnabled ? app.llmHotkey.keyCode : nil
+                ) { code in
                     app.rebindHotkey(
                         to: HotkeyBinding(
                             keyCode: code,
@@ -114,7 +117,10 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 if app.llmCleanupEnabled {
-                    HotkeyRecorder(keyCode: app.llmHotkey.keyCode) { code in
+                    HotkeyRecorder(
+                        keyCode: app.llmHotkey.keyCode,
+                        excludedKeyCode: app.hotkey.keyCode
+                    ) { code in
                         app.rebindLLMHotkey(
                             to: HotkeyBinding(
                                 keyCode: code,
