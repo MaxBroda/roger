@@ -33,6 +33,7 @@ mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 cp "$BINARY" "$CONTENTS/MacOS/Roger"
 cp "$ROOT/Resources/Info.plist" "$CONTENTS/Info.plist"
 cp "$ROOT/Resources/AppIcon.icns" "$CONTENTS/Resources/AppIcon.icns"
+cp "$ROOT/Resources/now-playing.js" "$CONTENTS/Resources/now-playing.js"
 
 # Share Tech Mono and IBM Plex Mono are not on every Mac. They travel along and
 # get registered via `ATSApplicationFontsPath` — for Roger only, without
