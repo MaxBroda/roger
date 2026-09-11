@@ -128,6 +128,16 @@ struct InputDeviceResolutionTests {
         #expect(resolved?.isSubstitute == true)
     }
 
+    @Test func weichtBeiAutomatischOhneEingebautesVomLoopbackAufExternesMikroAus() {
+        let resolved = AudioDeviceEnumerator.resolve(
+            .automatic,
+            available: [loopback, headset],
+            systemDefault: loopback
+        )
+        #expect(resolved?.device == headset)
+        #expect(resolved?.isSubstitute == true)
+    }
+
     @Test func haeltAggregatGeraeteFuerBrauchbar() {
         let resolved = AudioDeviceEnumerator.resolve(
             .explicit(uid: aggregate.uid),
