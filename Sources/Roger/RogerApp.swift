@@ -24,6 +24,10 @@ public final class RogerApp {
     private(set) var languages: [LanguageChoice] = []
     private(set) var activeLocale: Locale?
     private(set) var hotkey: HotkeyBinding
+    /// The second, LLM-cleanup push-to-talk key — read regardless of whether the
+    /// beta is on, so Settings has a binding to show once it's switched on.
+    private(set) var llmHotkey: HotkeyBinding
+    private(set) var llmCleanupEnabled: Bool
     /// No Dock icon, no app switcher entry, no window on launch.
     private(set) var isMenuBarOnly: Bool
     /// Which input device the microphone capture will pin at the next start.
@@ -55,11 +59,14 @@ public final class RogerApp {
     private static let retryDelays: [Duration] = [.seconds(5), .seconds(20), .seconds(60)]
 
     private let hotkeyPreference = HotkeyPreference()
+    private let llmHotkeyPreference = LLMHotkeyPreference()
+    private let llmCleanupPreference = LLMCleanupPreference()
     private let menuBarModePreference = MenuBarModePreference()
     private let inputDevicePreference = InputDevicePreference()
     private let musicPausePreference = MusicPausePreference()
     private var transcriber: SpeechAnalyzerTranscriber?
     private var monitor: HoldKeyMonitor?
+    private var llmMonitor: HoldKeyMonitor?
     private var session: DictationSession?
     private var runTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
@@ -70,6 +77,8 @@ public final class RogerApp {
         self.dictionary = dictionary
         self.history = history
         self.hotkey = hotkeyPreference.binding
+        self.llmHotkey = llmHotkeyPreference.binding
+        self.llmCleanupEnabled = llmCleanupPreference.isEnabled
         self.isMenuBarOnly = menuBarModePreference.isMenuBarOnly
         self.inputDeviceSelection = inputDevicePreference.selection
         self.pausesMusicWhileDictating = musicPausePreference.pausesMusic
@@ -127,21 +136,33 @@ public final class RogerApp {
         let monitor = HoldKeyMonitor(binding: hotkey)
         self.monitor = monitor
 
+        // A second tap and state machine only while the beta is on — off by
+        // default, so most launches never pay for it.
+        let llmMonitor = llmCleanupEnabled ? HoldKeyMonitor(binding: llmHotkey) : nil
+        self.llmMonitor = llmMonitor
+
         let media = MediaRemotePlayback(preference: musicPausePreference)
+
+        let dictionaryFormatter = DictionaryCorrector(store: dictionary)
+        let llmFormatter: (any TextFormatting)? = llmCleanupEnabled
+            ? SequentialTextFormatter(dictionaryFormatter, then: FoundationModelsFormatter())
+            : nil
 
         let session = DictationSession(
             hotkey: monitor,
+            llmHotkey: llmMonitor,
             audio: MicrophoneCapture(preference: inputDevicePreference),
             transcriber: transcriber,
-            formatter: DictionaryCorrector(store: dictionary),
+            formatter: dictionaryFormatter,
+            llmFormatter: llmFormatter,
             injector: PasteboardInjector(),
             media: media,
             spectrumBandCount: Design.Spectrum.bandCount
         )
         session.onStateChange = { [weak self] state in self?.apply(state) }
         session.onSpectrum = { [weak self] bands in self?.apply(bands: bands) }
-        session.onCompleted = { [weak self] result in
-            self?.history.append(result)
+        session.onCompleted = { [weak self] outcome in
+            self?.history.append(outcome)
         }
         self.session = session
 
@@ -191,6 +212,7 @@ public final class RogerApp {
         session?.shutdown()
         session = nil
         monitor = nil
+        llmMonitor = nil
         transcriber = nil
     }
 
@@ -260,6 +282,26 @@ public final class RogerApp {
         hotkey = binding
         monitor?.rebind(to: binding)
         onStatusChange?()
+    }
+
+    func rebindLLMHotkey(to binding: HotkeyBinding) {
+        guard binding != llmHotkey else { return }
+        llmHotkeyPreference.store(binding)
+        llmHotkey = binding
+        llmMonitor?.rebind(to: binding)
+        onStatusChange?()
+    }
+
+    /// Wires or unwires the second hotkey and its LLM formatter. `DictationSession`
+    /// takes both at construction, so toggling restacks — a brief "Lade
+    /// Sprachmodell …" reload, acceptable for a setting nobody flips often.
+    func setLLMCleanupEnabled(_ enabled: Bool) {
+        guard enabled != llmCleanupEnabled else { return }
+        llmCleanupPreference.store(enabled)
+        llmCleanupEnabled = enabled
+        guard session != nil else { return }
+        teardownStack()
+        startDictationStack()
     }
 
     func setMenuBarOnly(_ isMenuBarOnly: Bool) {
