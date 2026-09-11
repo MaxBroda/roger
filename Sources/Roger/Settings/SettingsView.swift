@@ -15,6 +15,7 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: Design.Space.xl) {
                 hotkeyPanel
+                llmCleanupPanel
                 languagePanel
                 microphonePanel
                 modePanel
@@ -95,6 +96,44 @@ struct SettingsView: View {
           \(KeyNames.name(of: app.hotkey.keyCode)) ist eine Modifier-Taste und tut allein \
           nichts. Sie wird nicht zurückgehalten, die Haltezeit kostet hier keine Latenz.
           """
+    }
+
+    private var llmCleanupPanel: some View {
+        RecessedPanel("Sprachmodell-Bereinigung (Beta)") {
+            VStack(alignment: .leading, spacing: Design.Space.lg) {
+                FieldCheckbox(
+                    isOn: .init(
+                        get: { app.llmCleanupEnabled },
+                        set: { app.setLLMCleanupEnabled($0) }
+                    ),
+                    label: "Zweite Taste: Diktat vor dem Einfügen mit Apple Intelligence aufbereiten"
+                )
+                Text(llmCleanupExplanation)
+                    .textStyle(Design.Typography.timestamp)
+                    .foregroundStyle(Design.Palette.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if app.llmCleanupEnabled {
+                    HotkeyRecorder(keyCode: app.llmHotkey.keyCode) { code in
+                        app.rebindLLMHotkey(
+                            to: HotkeyBinding(
+                                keyCode: code,
+                                holdThreshold: app.llmHotkey.holdThreshold,
+                                replaysShortPress: HotkeyBinding.needsReplay(keyCode: code)
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var llmCleanupExplanation: String {
+        """
+        Läuft vollständig auf diesem Gerät. Ist Apple Intelligence aus, das Gerät \
+        nicht dafür geeignet, oder das Modell noch nicht geladen, wird unverändert \
+        (aber weiterhin wörterbuch-korrigiert) eingefügt.
+        """
     }
 
     private var languagePanel: some View {
