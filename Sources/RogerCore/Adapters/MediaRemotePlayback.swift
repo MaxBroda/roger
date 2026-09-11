@@ -8,11 +8,10 @@ import os
 /// if a future macOS drops the symbol, dictation must keep working and this
 /// feature must simply stop happening.
 ///
-/// Only commands are sent, never queries. Reading the now-playing info needs an
-/// entitlement Apple stopped handing out with macOS 15.4 — it returns `nil` for
-/// everyone else. So "is anything playing?" is answered by CoreAudio instead
-/// (``AudioDeviceEnumerator/isDefaultOutputActive()``), which is public API but
-/// only knows about sound in general, not about players.
+/// Commands are sent through `MediaRemote` directly, but "is anything playing?"
+/// is answered by ``NowPlayingProbing`` instead — reading now-playing info
+/// needs an entitlement Apple stopped handing out with macOS 15.4, so this
+/// process asks a separate, Apple-signed one that isn't gated the same way.
 ///
 /// `@unchecked Sendable`: the mutable state below is guarded by `lock`.
 public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sendable {
@@ -32,6 +31,7 @@ public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sen
     private typealias SendCommand = @convention(c) (Int32, CFDictionary?) -> Bool
 
     private let preference: MusicPausePreference
+    private let nowPlaying: any NowPlayingProbing
     /// Every command runs here, one at a time and in the order it was issued.
     /// Ordering is the point: a resume that overtakes its pause finds nothing to
     /// resume, and the music stays down with nobody left to bring it back. That
@@ -51,17 +51,21 @@ public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sen
     /// Set once on quit, never cleared: from here on nothing may wait any more.
     private var isTerminating = false
 
-    public init(preference: MusicPausePreference = MusicPausePreference()) {
+    public init(
+        preference: MusicPausePreference = MusicPausePreference(),
+        nowPlaying: any NowPlayingProbing = NowPlayingMonitor()
+    ) {
         self.preference = preference
+        self.nowPlaying = nowPlaying
     }
 
-    /// The first CoreAudio call of a process costs around 70 ms, and loading the
-    /// framework a few more — both would otherwise land in the first dictation.
+    /// Loading the framework costs a few ms, and the probe spawns a process —
+    /// both would otherwise land in the first dictation.
     public func warmUp() {
         guard preference.pausesMusic else { return }
         queue.async {
             _ = self.loadedSendCommand()
-            _ = AudioDeviceEnumerator.isDefaultOutputActive()
+            _ = self.nowPlaying.isPlaying()
         }
     }
 
@@ -84,8 +88,8 @@ public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sen
     }
 
     private func pause() {
-        guard AudioDeviceEnumerator.isDefaultOutputActive() else {
-            Self.log.info("No audio playing — nothing to pause.")
+        guard nowPlaying.isPlaying() else {
+            Self.log.info("Nothing playing — nothing to pause.")
             return
         }
         let route = AudioDeviceEnumerator.defaultOutputRoute()
