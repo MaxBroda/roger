@@ -57,6 +57,14 @@ private struct TranscriptRow: View {
                     .buttonStyle(GhostButtonStyle(tint: Design.Palette.textSecondary))
             }
 
+            if let rawText = record.rawText {
+                Text(rawText)
+                    .textStyle(Design.Typography.timestamp)
+                    .foregroundStyle(Design.Palette.textDim)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Text(record.text)
                 .textStyle(Design.Typography.body)
                 .foregroundStyle(Design.Palette.textPrimary)
