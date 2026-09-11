@@ -298,6 +298,7 @@ public final class RogerApp {
         guard selection != inputDeviceSelection else { return }
         inputDevicePreference.store(selection, label: label)
         inputDeviceSelection = selection
+        droppedPinLabel = nil
         onStatusChange?()
     }
 
