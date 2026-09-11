@@ -38,12 +38,18 @@ public final class DictationSession {
     public var onSpectrum: (@MainActor ([Float]) -> Void)?
 
     /// A finished dictation plus the dictionary's changes — the log hangs off this.
-    public var onCompleted: (@MainActor (FormattingResult) -> Void)?
+    public var onCompleted: (@MainActor (DictationOutcome) -> Void)?
 
     private let hotkey: any HotkeyMonitoring
+    /// The second, optional push-to-talk key. `nil` when the LLM cleanup beta is
+    /// off — `run()` then behaves exactly as it did with one key.
+    private let llmHotkey: (any HotkeyMonitoring)?
     private let audio: any AudioCapturing
     private let transcriber: any Transcribing
     private let formatter: any TextFormatting
+    /// Runs instead of `formatter` for a dictation started on `llmHotkey`. `nil`
+    /// falls back to `formatter`, same as `llmHotkey` being `nil`.
+    private let llmFormatter: (any TextFormatting)?
     private let injector: any TextInjecting
     private let media: any MediaPlaybackControlling
     /// Passed in at construction rather than set later: the display drops band
@@ -56,48 +62,86 @@ public final class DictationSession {
     /// Counts dictations: this is how a straggler tells whether it still belongs
     /// to the dictation it was started for.
     private var generation = 0
+    /// Which key started the dictation currently in flight — so a release of the
+    /// *other* key does not end it.
+    private var activeMode: DictationMode = .standard
 
     public init(
         hotkey: any HotkeyMonitoring,
+        llmHotkey: (any HotkeyMonitoring)? = nil,
         audio: any AudioCapturing,
         transcriber: any Transcribing,
         formatter: any TextFormatting,
+        llmFormatter: (any TextFormatting)? = nil,
         injector: any TextInjecting,
         media: any MediaPlaybackControlling,
         spectrumBandCount: Int
     ) {
         self.hotkey = hotkey
+        self.llmHotkey = llmHotkey
         self.audio = audio
         self.transcriber = transcriber
         self.formatter = formatter
+        self.llmFormatter = llmFormatter
         self.injector = injector
         self.media = media
         self.spectrumBandCount = spectrumBandCount
     }
 
-    /// Runs until the hotkey stream ends. No `prepare()` here — that is the
+    /// Runs until the hotkey stream(s) end. No `prepare()` here — that is the
     /// caller's; a second one reloaded the model and, on failure, left the event
     /// tap unset.
     public func run() async throws {
-        for await event in try hotkey.start() {
+        let primary = try hotkey.start()
+        let secondary = try llmHotkey?.start()
+        for await (mode, event) in Self.merge(primary, .standard, secondary, .llmCleanup) {
             switch event {
-            case .pressBegan: begin()
-            case .pressEnded: end()
+            case .pressBegan: begin(mode: mode)
+            case .pressEnded: end(mode: mode)
             }
         }
     }
 
-    /// The button in the window: the same path as the key, just without holding.
-    public func startDictation() {
-        begin()
+    /// Tags each hotkey's events with the mode it drives and merges them onto one
+    /// stream. Finishes when the *primary* stream ends — the same contract `run()`
+    /// had with a single hotkey — and cancels the secondary alongside it.
+    private static func merge(
+        _ primary: AsyncStream<HotkeyEvent>, _ primaryMode: DictationMode,
+        _ secondary: AsyncStream<HotkeyEvent>?, _ secondaryMode: DictationMode
+    ) -> AsyncStream<(DictationMode, HotkeyEvent)> {
+        let (stream, continuation) = AsyncStream<(DictationMode, HotkeyEvent)>.makeStream(
+            bufferingPolicy: .bufferingNewest(8)
+        )
+        let primaryTask = Task {
+            for await event in primary { continuation.yield((primaryMode, event)) }
+            continuation.finish()
+        }
+        let secondaryTask = secondary.map { events in
+            Task {
+                for await event in events { continuation.yield((secondaryMode, event)) }
+            }
+        }
+        continuation.onTermination = { _ in
+            primaryTask.cancel()
+            secondaryTask?.cancel()
+        }
+        return stream
     }
 
+    /// The button in the window: the same path as the key, just without holding.
+    /// Always the standard formatter — there is no button for the LLM path yet.
+    public func startDictation() {
+        begin(mode: .standard)
+    }
+
+    /// Ends whatever is currently recording, regardless of which key started it —
+    /// a button press is not a key release and carries no mode of its own.
     public func stopDictation() {
         end()
     }
 
     public func toggleDictation() {
-        state == .recording ? end() : begin()
+        state == .recording ? end() : begin(mode: .standard)
     }
 
     public func shutdown() {
@@ -107,23 +151,27 @@ public final class DictationSession {
         dictationTask?.cancel()
         audio.stop()
         hotkey.stop()
+        llmHotkey?.stop()
         // No waiting for the audio route here — on quit there is no time for it,
         // and this call blocks until the music is back.
         media.resumeAfterDictation(waitingForRoute: false)
         state = .idle
     }
 
-    private func begin() {
+    private func begin(mode: DictationMode) {
         guard state.acceptsNewDictation else { return }
         generation += 1
         let generation = self.generation
+        activeMode = mode
         state = .recording
         Self.log.info("begin() generation=\(generation, privacy: .public)")
         // Before the microphone opens: with Bluetooth headsets the switch to the
         // low-quality call mode then happens while nothing is audible anyway.
         media.pauseForDictation()
 
-        dictationTask = Task { [audio, transcriber, formatter, injector] in
+        let activeFormatter: any TextFormatting = mode == .llmCleanup ? (llmFormatter ?? formatter) : formatter
+
+        dictationTask = Task { [audio, transcriber, activeFormatter, injector] in
             do {
                 let beginInstant = ContinuousClock.now
                 let format = await transcriber.preferredAudioFormat() ?? AudioFormat.fallback
@@ -165,14 +213,14 @@ public final class DictationSession {
                 let transcribeElapsed = ContinuousClock.now - transcribeInstant
                 Self.log.info("transcribe completed after \(transcribeElapsed, privacy: .public) generation=\(generation, privacy: .public)")
 
-                let polished = try await formatter.format(raw)
+                let polished = try await activeFormatter.format(raw)
 
                 // After a cancel the text would land in an app that is long gone.
                 guard self.generation == generation else { return }
 
                 self.state = .injecting
                 try await injector.inject(polished.transcript)
-                self.onCompleted?(polished)
+                self.onCompleted?(DictationOutcome(raw: raw, polished: polished, mode: mode))
                 self.setState(.idle, generation: generation)
             } catch is CancellationError {
                 Self.log.info("dictation cancelled via CancellationError. generation=\(generation, privacy: .public)")
@@ -215,6 +263,15 @@ public final class DictationSession {
         Self.log.info("end() generation=\(self.generation, privacy: .public)")
         state = .transcribing
         closeMicrophone(audio)
+    }
+
+    /// A hotkey release: only ends the dictation that key actually started. A
+    /// stray release of the *other* key while one is recording must not cut it
+    /// off — its own `begin(mode:)` was already a no-op via the state guard, but
+    /// nothing before this stopped its release from acting on the wrong session.
+    private func end(mode: DictationMode) {
+        guard mode == activeMode else { return }
+        end()
     }
 
     /// `nonisolated` on purpose: opening a capture device can block for seconds,
