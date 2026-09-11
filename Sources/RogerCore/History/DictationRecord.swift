@@ -5,10 +5,15 @@ public struct DictationRecord: Identifiable, Hashable, Sendable, Codable {
     public let id: UUID
     public let recordedAt: Date
     public let text: String
+    /// The transcript before the LLM cleanup pass touched it. `nil` for the
+    /// standard path — a model can lose content, so both versions stay
+    /// available when it ran (`docs/ideen.md` §1c).
+    public let rawText: String?
     public let corrections: [AppliedCorrection]
 
     public init(
         text: String,
+        rawText: String? = nil,
         corrections: [AppliedCorrection] = [],
         id: UUID = UUID(),
         recordedAt: Date = Date()
@@ -16,6 +21,7 @@ public struct DictationRecord: Identifiable, Hashable, Sendable, Codable {
         self.id = id
         self.recordedAt = recordedAt
         self.text = text
+        self.rawText = rawText
         self.corrections = corrections
     }
 
