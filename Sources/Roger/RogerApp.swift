@@ -30,8 +30,6 @@ public final class RogerApp {
     private(set) var llmCleanupEnabled: Bool
     /// No Dock icon, no app switcher entry, no window on launch.
     private(set) var isMenuBarOnly: Bool
-    /// Whether macOS starts Roger at login, via `SMAppService`.
-    private(set) var launchesAtLogin: Bool
     /// Which input device the microphone capture will pin at the next start.
     /// Mirrors the persisted preference so SwiftUI observes changes.
     private(set) var inputDeviceSelection: InputDeviceSelection
@@ -79,6 +77,11 @@ public final class RogerApp {
     private var retryTask: Task<Void, Never>?
     private var failureResetTask: Task<Void, Never>?
     private var startAttempt = 0
+    /// The app that had focus right before Roger's own window took it — where a
+    /// re-inserted entry belongs. Tracked continuously rather than read once, so
+    /// it survives however many times the user switches between other apps
+    /// before opening Roger.
+    private var lastExternalApplication: NSRunningApplication?
 
     public init(dictionary: DictionaryStore = DictionaryStore(), history: HistoryStore = HistoryStore()) {
         self.dictionary = dictionary
@@ -87,11 +90,11 @@ public final class RogerApp {
         self.llmHotkey = llmHotkeyPreference.binding
         self.llmCleanupEnabled = llmCleanupPreference.isEnabled
         self.isMenuBarOnly = menuBarModePreference.isMenuBarOnly
-        self.launchesAtLogin = loginItemPreference.isEnabled
         self.inputDeviceSelection = inputDevicePreference.selection
         self.pausesMusicWhileDictating = musicPausePreference.pausesMusic
         dropPinThatCannotRecord()
         observeWake()
+        observeFrontmostApplication()
     }
 
     /// A pin stored before #34 can point at a loopback driver, and Roger would
@@ -122,6 +125,22 @@ public final class RogerApp {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleWake() }
+        }
+    }
+
+    /// Roger activating itself (to show a window) fires this exactly like any
+    /// other app would — the filter below is what keeps it from overwriting the
+    /// target with itself.
+    private func observeFrontmostApplication() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  application.processIdentifier != ProcessInfo.processInfo.processIdentifier
+            else { return }
+            Task { @MainActor [weak self] in self?.lastExternalApplication = application }
         }
     }
 
@@ -271,9 +290,21 @@ public final class RogerApp {
     /// Pushes a past entry again through the same clipboard-and-paste route a
     /// live dictation uses — the wrong-focus case in the history needs a way
     /// back in that isn't "copy, then paste by hand".
+    ///
+    /// The button lives in Roger's own main window, so Roger is frontmost the
+    /// moment this runs — reactivating the app that had focus before is what
+    /// makes the paste land there instead of just sitting on the clipboard
+    /// (`PasteboardInjector` skips the paste entirely while Roger is frontmost).
     func reinsert(_ record: DictationRecord) {
         guard let transcript = Transcript(record.text) else { return }
-        Task { try? await PasteboardInjector().inject(transcript) }
+        let target = lastExternalApplication
+        Task {
+            if let target, !target.isTerminated {
+                target.activate()
+                try? await Task.sleep(for: .milliseconds(120))
+            }
+            try? await PasteboardInjector().inject(transcript)
+        }
     }
 
     func toggleDictation() {
@@ -343,6 +374,11 @@ public final class RogerApp {
         onMenuBarModeChange?()
     }
 
+    /// Read fresh rather than cached: `SMAppService`'s registration can change
+    /// from outside Roger too (System Settings → General → Login Items), the
+    /// same reason ``availableInputDevices()`` below isn't cached either.
+    var launchesAtLogin: Bool { loginItemPreference.isEnabled }
+
     /// Under ad-hoc signing `SMAppService` detaches the registration on every
     /// rebuild — the toggle will look flaky until Roger has a Developer ID (#8).
     /// Reported through the log rather than surfaced to the user: there is no
@@ -351,7 +387,6 @@ public final class RogerApp {
         guard enabled != launchesAtLogin else { return }
         do {
             try loginItemPreference.setEnabled(enabled)
-            launchesAtLogin = enabled
         } catch {
             Self.log.error("Login item registration failed: \(error.localizedDescription, privacy: .public)")
         }
