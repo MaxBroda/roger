@@ -165,8 +165,8 @@ final class HUDPanel {
         autoreleasepool {
             panel?.contentView = nil
             panel?.close()
+            panel = nil
         }
-        panel = nil
     }
 
     private func origin() -> NSPoint {
