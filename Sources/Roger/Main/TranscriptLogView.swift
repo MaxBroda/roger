@@ -6,8 +6,10 @@ import SwiftUI
 /// line is the actual point — a text that is right looks exactly like one that
 /// was never wrong.
 struct TranscriptLogView: View {
-    let history: HistoryStore
+    let app: RogerApp
     let query: String
+
+    private var history: HistoryStore { app.history }
 
     var body: some View {
         RecessedPanel("Verlauf", padding: 0) {
@@ -22,7 +24,11 @@ struct TranscriptLogView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(Array(records.enumerated()), id: \.element.id) { index, record in
                             if index > 0 { FieldDivider() }
-                            TranscriptRow(record: record) { history.remove(id: record.id) }
+                            TranscriptRow(
+                                record: record,
+                                onReinsert: { app.reinsert(record) },
+                                onDelete: { history.remove(id: record.id) }
+                            )
                         }
                     }
                 }
@@ -39,6 +45,7 @@ struct TranscriptLogView: View {
 
 private struct TranscriptRow: View {
     let record: DictationRecord
+    let onReinsert: () -> Void
     let onDelete: () -> Void
 
     @State private var didCopy = false
@@ -51,6 +58,8 @@ private struct TranscriptRow: View {
                     .foregroundStyle(Design.Palette.textSecondary)
                 EquipmentLabel("\(record.wordCount) Wörter")
                 Spacer()
+                Button("Einfügen", action: onReinsert)
+                    .buttonStyle(GhostButtonStyle(tint: Design.Palette.controlText))
                 Button(didCopy ? "Kopiert" : "Kopieren") { copy() }
                     .buttonStyle(GhostButtonStyle(tint: didCopy ? Design.Palette.accentAmber : Design.Palette.controlText))
                 Button("Löschen", action: onDelete)

@@ -264,6 +264,14 @@ public final class RogerApp {
         session?.stopDictation()
     }
 
+    /// Pushes a past entry again through the same clipboard-and-paste route a
+    /// live dictation uses — the wrong-focus case in the history needs a way
+    /// back in that isn't "copy, then paste by hand".
+    func reinsert(_ record: DictationRecord) {
+        guard let transcript = Transcript(record.text) else { return }
+        Task { try? await PasteboardInjector().inject(transcript) }
+    }
+
     func toggleDictation() {
         session?.toggleDictation()
     }
