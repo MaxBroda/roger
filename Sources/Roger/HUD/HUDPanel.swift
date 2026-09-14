@@ -155,7 +155,17 @@ final class HUDPanel {
     }
 
     private func dismiss() {
-        panel?.orderOut(nil)
+        // `orderOut`/`close()` alone still leaves the panel — and with it the
+        // entire `NSHostingView`/SwiftUI render tree, the actual CPU cost of a
+        // forgotten bubble — sitting in the run loop's outer autorelease pool
+        // until the *next* AppKit event drains it, which may never come once
+        // dictation stops. Dropping `contentView` tears the SwiftUI tree down
+        // immediately regardless; `autoreleasepool` forces the window itself
+        // to go the same way instead of waiting on a future event.
+        autoreleasepool {
+            panel?.contentView = nil
+            panel?.close()
+        }
         panel = nil
     }
 
