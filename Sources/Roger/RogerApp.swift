@@ -30,6 +30,8 @@ public final class RogerApp {
     private(set) var llmCleanupEnabled: Bool
     /// No Dock icon, no app switcher entry, no window on launch.
     private(set) var isMenuBarOnly: Bool
+    /// Whether macOS starts Roger at login, via `SMAppService`.
+    private(set) var launchesAtLogin: Bool
     /// Which input device the microphone capture will pin at the next start.
     /// Mirrors the persisted preference so SwiftUI observes changes.
     private(set) var inputDeviceSelection: InputDeviceSelection
@@ -66,6 +68,7 @@ public final class RogerApp {
     private let llmHotkeyPreference = LLMHotkeyPreference()
     private let llmCleanupPreference = LLMCleanupPreference()
     private let menuBarModePreference = MenuBarModePreference()
+    private let loginItemPreference = LoginItemPreference()
     private let inputDevicePreference = InputDevicePreference()
     private let musicPausePreference = MusicPausePreference()
     private var transcriber: SpeechAnalyzerTranscriber?
@@ -84,6 +87,7 @@ public final class RogerApp {
         self.llmHotkey = llmHotkeyPreference.binding
         self.llmCleanupEnabled = llmCleanupPreference.isEnabled
         self.isMenuBarOnly = menuBarModePreference.isMenuBarOnly
+        self.launchesAtLogin = loginItemPreference.isEnabled
         self.inputDeviceSelection = inputDevicePreference.selection
         self.pausesMusicWhileDictating = musicPausePreference.pausesMusic
         dropPinThatCannotRecord()
@@ -337,6 +341,21 @@ public final class RogerApp {
         menuBarModePreference.store(isMenuBarOnly)
         self.isMenuBarOnly = isMenuBarOnly
         onMenuBarModeChange?()
+    }
+
+    /// Under ad-hoc signing `SMAppService` detaches the registration on every
+    /// rebuild — the toggle will look flaky until Roger has a Developer ID (#8).
+    /// Reported through the log rather than surfaced to the user: there is no
+    /// action they could take about their own build's signature.
+    func setLaunchesAtLogin(_ enabled: Bool) {
+        guard enabled != launchesAtLogin else { return }
+        do {
+            try loginItemPreference.setEnabled(enabled)
+            launchesAtLogin = enabled
+        } catch {
+            Self.log.error("Login item registration failed: \(error.localizedDescription, privacy: .public)")
+        }
+        onStatusChange?()
     }
 
     /// The user's persisted input-device choice. `MicrophoneCapture` re-reads

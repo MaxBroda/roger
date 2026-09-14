@@ -394,6 +394,17 @@ struct SettingsView: View {
                     .textStyle(Design.Typography.timestamp)
                     .foregroundStyle(Design.Palette.textDim)
                     .fixedSize(horizontal: false, vertical: true)
+
+                FieldDivider()
+                    .padding(.vertical, Design.Space.xs)
+
+                FieldCheckbox(
+                    isOn: .init(
+                        get: { app.launchesAtLogin },
+                        set: { app.setLaunchesAtLogin($0) }
+                    ),
+                    label: "Beim Anmelden starten"
+                )
             }
         }
     }
