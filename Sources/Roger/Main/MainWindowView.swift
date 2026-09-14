@@ -62,7 +62,7 @@ struct MainWindowView: View {
     private var content: some View {
         switch section {
         case .log:
-            TranscriptLogView(history: app.history, query: query)
+            TranscriptLogView(app: app, query: query)
         case .dictionary:
             DictionaryPanelView(store: app.dictionary, query: query)
         }
