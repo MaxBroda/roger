@@ -84,6 +84,34 @@ struct TextCorrectorTests {
         let subject = TextCorrector(rules: [])
         #expect(subject.apply(to: "Nichts zu tun.").text == "Nichts zu tun.")
     }
+
+    @Test func neueGitVerhörformenGreifenImVollständigenWörterbuch() {
+        let subject = TextCorrector(rules: PhraseDictionary(entries: DictionarySeed.entries).rules)
+        let cases: [(hear: String, expect: String)] = [
+            ("merch", "Merge"),
+            ("tschekaut", "Checkout"),
+            ("check aut", "Checkout"),
+            ("fetsch", "Fetch"),
+            ("force pusch", "Force Push"),
+            ("wörktri", "Worktree"),
+            ("work tree", "Worktree"),
+        ]
+        for testCase in cases {
+            let result = subject.apply(to: "ein \(testCase.hear) machen")
+            #expect(result.text == "ein \(testCase.expect) machen")
+        }
+    }
+
+    /// `cloud` alone and `cloud code` coexist in the seed — the longer pattern
+    /// has to keep winning, or `cloud code` would come out half-corrected.
+    /// The second line is the accepted trade-off, not a regression: an
+    /// ordinary "cloud" is deliberately rewritten too, see
+    /// ``DictionaryRisk/commonWord(_:)``.
+    @Test func cloudUndCloudCodeKollidierenNichtImVollständigenWörterbuch() {
+        let subject = TextCorrector(rules: PhraseDictionary(entries: DictionarySeed.entries).rules)
+        #expect(subject.apply(to: "ich starte cloud code").text == "ich starte Claude Code")
+        #expect(subject.apply(to: "wir speichern das in der cloud").text == "wir speichern das in der Claude")
+    }
 }
 
 struct DictionaryEntryTests {
