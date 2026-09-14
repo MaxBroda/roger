@@ -43,7 +43,8 @@ public enum DictionarySeed {
         "Pull Request", "Pull Requests", "Commit", "Commits", "Repository",
         "Branch", "Merge", "Merge-Konflikt", "Rebase", "Squash", "Stash",
         "Cherry-Pick", "Code Review", "Changelog", "Hotfix", "Monorepo",
-        "Feature Flag", "Deployment", "Staging", "PR",
+        "Feature Flag", "Deployment", "Staging", "PR", "Push", "Pull", "Fetch",
+        "Checkout", "Force Push", "Diff", "Worktree", "Amend",
         // Vue and Nuxt specifics
         "Component", "Components", "Composable", "Composables", "Prop", "Props",
         "Slot", "Slots", "Emit", "Computed", "Watcher", "Ref", "Reactive",
@@ -99,6 +100,9 @@ public enum DictionarySeed {
     /// Corrections: what Roger hears, and what he should write.
     static let corrections: [(hear: String, write: String)] = [
         // Claude Code — by far the most common mix-up
+        // "cloud" alone rewrites every occurrence of the ordinary word too —
+        // accepted deliberately, see ``DictionaryRisk/commonWord(_:)``.
+        ("cloud", "Claude"),
         ("cloud code", "Claude Code"),
         ("klaut code", "Claude Code"),
         ("clode code", "Claude Code"),
@@ -157,6 +161,13 @@ public enum DictionarySeed {
         ("change lock", "Changelog"),
         ("hot fix", "Hotfix"),
         ("mono repo", "Monorepo"),
+        ("merch", "Merge"),
+        ("tschekaut", "Checkout"),
+        ("check aut", "Checkout"),
+        ("fetsch", "Fetch"),
+        ("force pusch", "Force Push"),
+        ("wörktri", "Worktree"),
+        ("work tree", "Worktree"),
         // Languages
         ("teip skript", "TypeScript"),
         ("typskript", "TypeScript"),
