@@ -29,13 +29,41 @@ public final class HistoryStore {
         let record = DictationRecord(
             text: outcome.polished.transcript.text,
             rawText: outcome.mode == .llmCleanup ? outcome.raw.text : nil,
-            corrections: outcome.polished.corrections
+            corrections: outcome.polished.corrections,
+            duration: outcome.duration
         )
         records.insert(record, at: 0)
         if records.count > limit { records.removeLast(records.count - limit) }
         lifetimeWords += record.wordCount
         persist()
         return record
+    }
+
+    /// What dictating saved over typing this week's words at `speed`.
+    ///
+    /// Entries from before Roger timed a dictation have words but no duration.
+    /// Their speech time is estimated rather than taken as zero, which would
+    /// credit dictation with their full typing time — and rather than dropping
+    /// them, which in the week of the update itself empties the readout. Only
+    /// that one week can contain them.
+    public func timeSavedThisWeek(typingAt speed: TypingSpeed, now: Date = Date()) -> SavedTime {
+        let week = Self.week(containing: now)
+        let entries = records.filter { week.contains($0.recordedAt) }
+        return SavedTime(
+            words: entries.reduce(0) { $0 + $1.wordCount },
+            spokenSeconds: entries.reduce(0) { $0 + ($1.duration ?? TypingSpeed.spoken.time(forWords: $1.wordCount)) },
+            typingAt: speed
+        )
+    }
+
+    /// Monday to Sunday, whatever `Calendar.current` considers the first weekday
+    /// — that follows a system setting, and the readout should not silently mean
+    /// a different week on a machine set to US regional formats.
+    private static func week(containing date: Date) -> DateInterval {
+        var calendar = Calendar.current
+        calendar.firstWeekday = 2
+        return calendar.dateInterval(of: .weekOfYear, for: date)
+            ?? DateInterval(start: date, duration: 0)
     }
 
     public func search(_ query: String) -> [DictationRecord] {
@@ -48,7 +76,8 @@ public final class HistoryStore {
     }
 
     /// Clears the entries, keeps the word total — emptying the store does not
-    /// unspeak the words.
+    /// unspeak the words. The week's saving goes with the entries, because that
+    /// is what it is computed from.
     public func clear() {
         records.removeAll()
         persist()

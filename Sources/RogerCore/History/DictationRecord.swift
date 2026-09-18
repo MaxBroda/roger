@@ -10,11 +10,16 @@ public struct DictationRecord: Identifiable, Hashable, Sendable, Codable {
     /// available when it ran (`docs/ideen.md` §1c).
     public let rawText: String?
     public let corrections: [AppliedCorrection]
+    /// How long the key was held for this dictation. `nil` for entries written
+    /// before Roger measured it — a required field would fail the decode of
+    /// every one of them, and the log would silently start over empty.
+    public let duration: TimeInterval?
 
     public init(
         text: String,
         rawText: String? = nil,
         corrections: [AppliedCorrection] = [],
+        duration: TimeInterval? = nil,
         id: UUID = UUID(),
         recordedAt: Date = Date()
     ) {
@@ -23,6 +28,7 @@ public struct DictationRecord: Identifiable, Hashable, Sendable, Codable {
         self.text = text
         self.rawText = rawText
         self.corrections = corrections
+        self.duration = duration
     }
 
     /// Anything separated by whitespace — punctuation sticks to its word.
