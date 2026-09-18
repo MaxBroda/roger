@@ -37,6 +37,11 @@ public final class RogerApp {
     private(set) var pausesMusicWhileDictating: Bool
     /// The typing speed the saved-time readout measures dictation against.
     private(set) var typingSpeed: TypingSpeed
+    /// Start of the week the readout counts. Held as state rather than read from
+    /// the clock on each access: the saving is the one value in the control row
+    /// that goes stale on its own, and an idle Roger changes nothing else at
+    /// midnight on Monday that would redraw the row.
+    private(set) var currentWeekStart: Date = HistoryStore.weekStart(containing: Date())
     /// The pinned device Roger dropped at launch because a voice cannot reach
     /// it. Kept so the settings panel can say what happened instead of showing
     /// a setting that silently changed itself.
@@ -79,6 +84,7 @@ public final class RogerApp {
     private var runTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
     private var failureResetTask: Task<Void, Never>?
+    private var weekRolloverTask: Task<Void, Never>?
     private var startAttempt = 0
     /// The app that had focus right before Roger's own window took it — where a
     /// re-inserted entry belongs. Tracked continuously rather than read once, so
@@ -98,7 +104,27 @@ public final class RogerApp {
         self.typingSpeed = typingSpeedPreference.speed
         dropPinThatCannotRecord()
         observeWake()
+        observeWeekRollover()
         observeFrontmostApplication()
+    }
+
+    /// Hourly rather than one long sleep until Monday: a Mac spends its nights
+    /// asleep, and a `Task.sleep` spanning days does not survive that reliably.
+    /// An hour of lag on a weekly figure is not worth a wake-up of its own.
+    private func observeWeekRollover() {
+        weekRolloverTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3600))
+                guard let self, !Task.isCancelled else { return }
+                self.refreshWeek()
+            }
+        }
+    }
+
+    private func refreshWeek() {
+        let start = HistoryStore.weekStart(containing: Date())
+        guard start != currentWeekStart else { return }
+        currentWeekStart = start
     }
 
     /// A pin stored before #34 can point at a loopback driver, and Roger would
@@ -150,6 +176,8 @@ public final class RogerApp {
 
     private func handleWake() {
         Self.log.info("System woke — checking dictation stack.")
+        // A Mac asleep from Friday to Monday skips every hourly tick above.
+        refreshWeek()
         // Retry budget starts fresh: whatever failed before sleep does not count
         // against the post-wake attempt.
         startAttempt = 0
@@ -421,7 +449,13 @@ public final class RogerApp {
     /// What dictating has saved over typing this week, at the configured speed.
     /// Derived rather than stored: a speed changed today has to apply to the
     /// entries already in the week, not only to the next one.
-    var timeSavedThisWeek: SavedTime { history.timeSavedThisWeek(typingAt: typingSpeed) }
+    ///
+    /// Reading `currentWeekStart` is what makes the row redraw when the week
+    /// turns — it is also a point inside the week being asked about, so it
+    /// doubles as the reference date.
+    var timeSavedThisWeek: SavedTime {
+        history.timeSavedThisWeek(typingAt: typingSpeed, now: currentWeekStart)
+    }
 
     func setTypingSpeed(_ speed: TypingSpeed) {
         guard speed != typingSpeed else { return }
