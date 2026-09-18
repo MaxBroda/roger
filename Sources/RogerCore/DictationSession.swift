@@ -65,6 +65,12 @@ public final class DictationSession {
     /// Which key started the dictation currently in flight — so a release of the
     /// *other* key does not end it.
     private var activeMode: DictationMode = .standard
+    /// When the key went down, and how long it stayed down. Only the press
+    /// counts towards the saved-time stat: what happens after the release is
+    /// Roger's time, and charging it to the user would score the same sentence
+    /// differently on the two hotkeys.
+    private var speechStart: ContinuousClock.Instant?
+    private var speechDuration: Duration = .zero
 
     public init(
         hotkey: any HotkeyMonitoring,
@@ -163,6 +169,9 @@ public final class DictationSession {
         generation += 1
         let generation = self.generation
         activeMode = mode
+        // Taken before the state change, so the route switch a Bluetooth headset
+        // makes below counts as what it is: time the user spends holding the key.
+        speechStart = ContinuousClock.now
         state = .recording
         Self.log.info("begin() generation=\(generation, privacy: .public)")
         // Before the microphone opens: with Bluetooth headsets the switch to the
@@ -220,7 +229,12 @@ public final class DictationSession {
 
                 self.state = .injecting
                 try await injector.inject(polished.transcript)
-                self.onCompleted?(DictationOutcome(raw: raw, polished: polished, mode: mode))
+                self.onCompleted?(DictationOutcome(
+                    raw: raw,
+                    polished: polished,
+                    mode: mode,
+                    duration: self.speechDuration.timeInterval
+                ))
                 self.setState(.idle, generation: generation)
             } catch is CancellationError {
                 Self.log.info("dictation cancelled via CancellationError. generation=\(generation, privacy: .public)")
@@ -261,6 +275,7 @@ public final class DictationSession {
     private func end() {
         guard state == .recording else { return }
         Self.log.info("end() generation=\(self.generation, privacy: .public)")
+        speechDuration = speechStart.map { ContinuousClock.now - $0 } ?? .zero
         state = .transcribing
         closeMicrophone(audio)
     }

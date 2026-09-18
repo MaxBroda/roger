@@ -1,3 +1,5 @@
+import Foundation
+
 /// Which formatting path a dictation ran through — picked per press, not per
 /// session, so a second hotkey can pick the LLM cleanup pass without a second
 /// `DictationSession`.
@@ -13,10 +15,19 @@ public struct DictationOutcome: Sendable {
     public let raw: Transcript
     public let polished: FormattingResult
     public let mode: DictationMode
+    /// How long the key was held — what the dictation cost the user, without the
+    /// transcription and formatting that only start once it is released.
+    public let duration: TimeInterval
 
-    public init(raw: Transcript, polished: FormattingResult, mode: DictationMode) {
+    public init(
+        raw: Transcript,
+        polished: FormattingResult,
+        mode: DictationMode,
+        duration: TimeInterval
+    ) {
         self.raw = raw
         self.polished = polished
         self.mode = mode
+        self.duration = duration
     }
 }
