@@ -11,6 +11,10 @@ struct SettingsView: View {
     /// 150 ms normal typing starts a recording, above 400 ms the key feels slow.
     private static let thresholds = [150, 200, 220, 280, 350, 450]
 
+    /// Fine enough to land on a speed that feels right, coarse enough that
+    /// reaching the other end of the band does not take forty clicks.
+    private static let typingSpeedStep = 5
+
     var body: some View {
         ScrollView {
             VStack(spacing: Design.Space.xl) {
@@ -19,6 +23,7 @@ struct SettingsView: View {
                 languagePanel
                 microphonePanel
                 modePanel
+                typingSpeedPanel
                 filesPanel
             }
             .padding(Design.Space.xl)
@@ -425,6 +430,63 @@ struct SettingsView: View {
           Hauptfenster beim Start. Für den reinen Hintergrundbetrieb hier \
           einschalten — die Umstellung greift, sobald das letzte Fenster zu ist.
           """
+    }
+
+    private var typingSpeedPanel: some View {
+        RecessedPanel("Zeitersparnis") {
+            VStack(alignment: .leading, spacing: Design.Space.sm) {
+                EquipmentLabel("Tippgeschwindigkeit")
+                HStack(spacing: Design.Space.sm) {
+                    typingSpeedButton("−", to: app.typingSpeed.wordsPerMinute - Self.typingSpeedStep)
+                    Text(app.typingSpeed.wordsPerMinute.formatted())
+                        .textStyle(Design.Typography.readout)
+                        .foregroundStyle(Design.Palette.accentAmber)
+                        .monospacedDigit()
+                        .frame(width: 52)
+                    typingSpeedButton("+", to: app.typingSpeed.wordsPerMinute + Self.typingSpeedStep)
+                    Text("Wörter pro Minute")
+                        .textStyle(Design.Typography.timestamp)
+                        .foregroundStyle(Design.Palette.textDim)
+                }
+                Text(typingSpeedExplanation)
+                    .textStyle(Design.Typography.timestamp)
+                    .foregroundStyle(Design.Palette.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, Design.Space.xs)
+            }
+        }
+    }
+
+    private func typingSpeedButton(_ symbol: String, to wordsPerMinute: Int) -> some View {
+        let isAvailable = TypingSpeed.range.contains(wordsPerMinute)
+        return Button {
+            app.setTypingSpeed(TypingSpeed(wordsPerMinute: wordsPerMinute))
+        } label: {
+            Text(symbol)
+                .textStyle(Design.Typography.label)
+                .foregroundStyle(Design.Palette.controlText)
+                .frame(width: 30, height: 24)
+                .background(Design.Palette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: Design.Radius.sm, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Design.Radius.sm, style: .continuous)
+                        .strokeBorder(Design.Palette.controlBorder, lineWidth: Design.Border.hairline)
+                }
+        }
+        .buttonStyle(.plain)
+        .disabled(!isAvailable)
+        .opacity(isAvailable ? 1 : Design.Emphasis.disabled)
+    }
+
+    private var typingSpeedExplanation: String {
+        """
+        Grundlage für „Gespart/Woche" im Hauptfenster: die Wörter der \
+        laufenden Woche kosten bei dieser Geschwindigkeit eine bestimmte \
+        Tippzeit, davon geht ab, wie lange das Diktieren tatsächlich gedauert \
+        hat. Gezählt wird Montag bis Sonntag; für Diktate aus der Zeit vor \
+        diesem Update gibt es keine gemessene Dauer, sie sind mit einem \
+        angenommenen Sprechtempo geschätzt.
+        """
     }
 
     private var filesPanel: some View {

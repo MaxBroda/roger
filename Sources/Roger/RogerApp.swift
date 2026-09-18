@@ -35,6 +35,8 @@ public final class RogerApp {
     private(set) var inputDeviceSelection: InputDeviceSelection
     /// Whether a dictation silences whatever is playing for its duration.
     private(set) var pausesMusicWhileDictating: Bool
+    /// The typing speed the saved-time readout measures dictation against.
+    private(set) var typingSpeed: TypingSpeed
     /// The pinned device Roger dropped at launch because a voice cannot reach
     /// it. Kept so the settings panel can say what happened instead of showing
     /// a setting that silently changed itself.
@@ -69,6 +71,7 @@ public final class RogerApp {
     private let loginItemPreference = LoginItemPreference()
     private let inputDevicePreference = InputDevicePreference()
     private let musicPausePreference = MusicPausePreference()
+    private let typingSpeedPreference = TypingSpeedPreference()
     private var transcriber: SpeechAnalyzerTranscriber?
     private var monitor: HoldKeyMonitor?
     private var llmMonitor: HoldKeyMonitor?
@@ -92,6 +95,7 @@ public final class RogerApp {
         self.isMenuBarOnly = menuBarModePreference.isMenuBarOnly
         self.inputDeviceSelection = inputDevicePreference.selection
         self.pausesMusicWhileDictating = musicPausePreference.pausesMusic
+        self.typingSpeed = typingSpeedPreference.speed
         dropPinThatCannotRecord()
         observeWake()
         observeFrontmostApplication()
@@ -412,6 +416,17 @@ public final class RogerApp {
         guard pausesMusic != pausesMusicWhileDictating else { return }
         musicPausePreference.store(pausesMusic)
         pausesMusicWhileDictating = pausesMusic
+    }
+
+    /// What dictating has saved over typing this week, at the configured speed.
+    /// Derived rather than stored: a speed changed today has to apply to the
+    /// entries already in the week, not only to the next one.
+    var timeSavedThisWeek: SavedTime { history.timeSavedThisWeek(typingAt: typingSpeed) }
+
+    func setTypingSpeed(_ speed: TypingSpeed) {
+        guard speed != typingSpeed else { return }
+        typingSpeedPreference.store(speed)
+        typingSpeed = speed
     }
 
     /// Every input device a voice can reach. Read on demand from CoreAudio; the
