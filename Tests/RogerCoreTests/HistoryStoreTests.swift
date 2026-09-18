@@ -146,13 +146,16 @@ struct HistoryStoreTests {
     func überlebtDasVerdrängenAlterEinträgeDerselbenWoche() {
         let url = temporaryFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        let store = HistoryStore(fileURL: url, now: now)
+        // A small cap rather than the real 500: the eviction path is the point,
+        // and every append rewrites the whole file — 500 of them make this test
+        // slow enough to starve the other @MainActor suites running alongside it.
+        let store = HistoryStore(fileURL: url, now: now, limit: 5)
 
-        for _ in 1...520 { store.append(outcome("drei kleine Wörter", duration: 1)) }
+        for _ in 1...8 { store.append(outcome("drei kleine Wörter", duration: 1)) }
 
-        #expect(store.records.count == 500)
-        // All 520 still count: 1560 words are 2340 s of typing, 520 s spoken.
-        #expect(abs(saving(store, at: Date()) - (2340 - 520)) < 0.001)
+        #expect(store.records.count == 5)
+        // All 8 still count: 24 words are 36 s of typing, 8 s spoken.
+        #expect(abs(saving(store, at: Date()) - (36 - 8)) < 0.001)
     }
 
     /// The tally is only rewritten by the next dictation, so until then it

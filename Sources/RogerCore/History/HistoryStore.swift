@@ -11,15 +11,16 @@ public final class HistoryStore {
     public private(set) var lifetimeWords: Int = 0
 
     /// Capped, because the file is rewritten in full after every dictation.
-    private let limit = 500
+    private let limit: Int
 
     private let file: JSONFile<HistoryArchive>
 
     /// The running week. Private: outside this type it is only ever the saving.
     private var week: WeekTally
 
-    public init(fileURL: URL = AppFiles.history, now: Date = Date()) {
+    public init(fileURL: URL = AppFiles.history, now: Date = Date(), limit: Int = 500) {
         self.file = JSONFile(url: fileURL)
+        self.limit = limit
         let archive = ((try? file.read()) ?? nil) ?? .empty
         self.records = archive.records
         self.lifetimeWords = archive.lifetimeWords
