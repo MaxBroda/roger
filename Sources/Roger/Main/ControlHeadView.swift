@@ -81,9 +81,14 @@ struct ControlHeadView: View {
 
             Spacer()
 
-            Readout(value: app.history.lifetimeWords.formatted(), caption: "Wörter")
-            Readout(value: app.history.records.count.formatted(), caption: "Diktate")
-            Readout(value: app.dictionary.dictionary.entries.count.formatted(), caption: "Einträge")
+            // Wider than the row's own spacing: four readings pressed together
+            // read as one number with three suffixes.
+            HStack(spacing: Design.Space.xxl) {
+                Readout(value: app.history.lifetimeWords.formatted(), caption: "Wörter")
+                Readout(value: app.history.records.count.formatted(), caption: "Diktate")
+                Readout(value: app.dictionary.dictionary.entries.count.formatted(), caption: "Einträge")
+                Readout(value: app.timeSavedThisWeek.label, caption: "Gespart/Woche")
+            }
         }
     }
 }
