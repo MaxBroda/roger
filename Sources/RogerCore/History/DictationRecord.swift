@@ -44,11 +44,27 @@ public struct DictationRecord: Identifiable, Hashable, Sendable, Codable {
     }
 }
 
-/// The word total is stored rather than derived: the log is capped, the total is
-/// not meant to be.
+/// The running week, stored rather than derived from `records` for the same
+/// reason as the word total: the log is capped at 500 entries, and a heavy week
+/// reaches that. Words and speech time rather than a finished saving, so a
+/// typing speed changed on Friday still applies to Monday.
+struct WeekTally: Codable, Sendable, Equatable {
+    var weekStart: Date
+    var words: Int
+    var spokenSeconds: TimeInterval
+
+    static let none = WeekTally(weekStart: .distantPast, words: 0, spokenSeconds: 0)
+}
+
+/// The totals are stored rather than derived: the log is capped, they are not
+/// meant to be.
 struct HistoryArchive: Codable, Sendable {
     var lifetimeWords: Int
+    /// Optional for the same reason as ``DictationRecord/duration``: archives
+    /// written before the saved-time stat exist, and a failed decode is
+    /// indistinguishable from a first launch.
+    var week: WeekTally?
     var records: [DictationRecord]
 
-    static let empty = HistoryArchive(lifetimeWords: 0, records: [])
+    static let empty = HistoryArchive(lifetimeWords: 0, week: .none, records: [])
 }
