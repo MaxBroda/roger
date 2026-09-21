@@ -58,7 +58,21 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
     }
 
+    /// A closed window is dropped rather than kept for the next `present()`.
+    /// The `NSHostingView` keeps observing `RogerApp` and keeps running whatever
+    /// animation is in flight for as long as it exists — a window nobody can see
+    /// went on costing a frame's work for the rest of the session.
+    ///
+    /// Deferred: AppKit is still walking this window's view tree while the
+    /// notification runs. `autoreleasepool` drops the SwiftUI tree right there
+    /// instead of at the next AppKit event, the same reason ``HUDPanel`` uses one.
     func windowWillClose(_ notification: Notification) {
         onVisibilityWillChange?(false)
+        let closing = window
+        closing?.delegate = nil
+        window = nil
+        Task { @MainActor in
+            autoreleasepool { closing?.contentView = nil }
+        }
     }
 }

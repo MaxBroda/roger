@@ -15,19 +15,36 @@ public final class HistoryStore {
 
     private let file: JSONFile<HistoryArchive>
 
+    /// Read on every append rather than captured once: the store outlives the
+    /// week it was built in, and a snapshot would stamp Monday's dictations with
+    /// the day Roger happened to launch.
+    private let now: @Sendable () -> Date
+
     /// The running week. Private: outside this type it is only ever the saving.
     private var week: WeekTally
 
-    public init(fileURL: URL = AppFiles.history, now: Date = Date(), limit: Int = 500) {
+    public init(
+        fileURL: URL = AppFiles.history,
+        now: @escaping @Sendable () -> Date = Date.init,
+        limit: Int = 500
+    ) {
         self.file = JSONFile(url: fileURL)
         self.limit = limit
+        self.now = now
         let archive = ((try? file.read()) ?? nil) ?? .empty
         self.records = archive.records
         self.lifetimeWords = archive.lifetimeWords
         // No tally yet means an archive from before this stat: build one from
         // the entries still in the log, which for the running week is all of
         // them — the cap only bites from the 501st dictation in a week.
-        self.week = archive.week ?? Self.tally(ofWeekContaining: now, in: archive.records)
+        self.week = archive.week ?? Self.tally(ofWeekContaining: now(), in: archive.records)
+    }
+
+    /// A store frozen at one date. For tests: they need `append` to stamp an
+    /// entry with a date they chose, or an assertion about "next week" starts
+    /// depending on the day the suite happens to run.
+    convenience init(fileURL: URL, clockAt date: Date, limit: Int = 500) {
+        self.init(fileURL: fileURL, now: { date }, limit: limit)
     }
 
     public var fileURL: URL { file.url }
@@ -38,7 +55,8 @@ public final class HistoryStore {
             text: outcome.polished.transcript.text,
             rawText: outcome.mode == .llmCleanup ? outcome.raw.text : nil,
             corrections: outcome.polished.corrections,
-            duration: outcome.duration
+            duration: outcome.duration,
+            recordedAt: now()
         )
         records.insert(record, at: 0)
         if records.count > limit { records.removeLast(records.count - limit) }
