@@ -51,7 +51,7 @@ struct HistoryStoreTests {
     private func store(_ entries: [(at: Date, duration: TimeInterval?)]) throws -> HistoryStore {
         let url = temporaryFile()
         try Data(archive(entries).utf8).write(to: url)
-        return HistoryStore(fileURL: url, now: now)
+        return HistoryStore(fileURL: url, clockAt: now)
     }
 
     private func outcome(_ text: String, duration: TimeInterval) -> DictationOutcome {
@@ -149,13 +149,13 @@ struct HistoryStoreTests {
         // A small cap rather than the real 500: the eviction path is the point,
         // and every append rewrites the whole file — 500 of them make this test
         // slow enough to starve the other @MainActor suites running alongside it.
-        let store = HistoryStore(fileURL: url, now: now, limit: 5)
+        let store = HistoryStore(fileURL: url, clockAt: now, limit: 5)
 
         for _ in 1...8 { store.append(outcome("drei kleine Wörter", duration: 1)) }
 
         #expect(store.records.count == 5)
         // All 8 still count: 24 words are 36 s of typing, 8 s spoken.
-        #expect(abs(saving(store, at: Date()) - (36 - 8)) < 0.001)
+        #expect(abs(saving(store) - (36 - 8)) < 0.001)
     }
 
     /// The tally is only rewritten by the next dictation, so until then it
@@ -172,10 +172,10 @@ struct HistoryStoreTests {
     func beginntInDerNeuenWocheBeiNull() {
         let url = temporaryFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        let store = HistoryStore(fileURL: url, now: now)
+        let store = HistoryStore(fileURL: url, clockAt: now)
         store.append(outcome("drei kleine Wörter", duration: 1))
 
-        let reopened = HistoryStore(fileURL: url, now: nextMonday)
+        let reopened = HistoryStore(fileURL: url, clockAt: nextMonday)
 
         #expect(reopened.timeSavedThisWeek(typingAt: .default, now: nextMonday).label == "—")
         #expect(reopened.lifetimeWords == 3)
@@ -185,12 +185,12 @@ struct HistoryStoreTests {
     func schreibtDieGemesseneDauerInDenEintrag() {
         let url = temporaryFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        let store = HistoryStore(fileURL: url, now: now)
+        let store = HistoryStore(fileURL: url, clockAt: now)
 
         store.append(outcome("drei kleine Wörter", duration: 4.5))
 
         #expect(store.records.first?.duration == 4.5)
         #expect(store.lifetimeWords == 3)
-        #expect(HistoryStore(fileURL: url, now: now).records.first?.duration == 4.5)
+        #expect(HistoryStore(fileURL: url, clockAt: now).records.first?.duration == 4.5)
     }
 }
