@@ -181,6 +181,30 @@ struct HistoryStoreTests {
         #expect(reopened.lifetimeWords == 3)
     }
 
+    /// The store outlives the week it was built in: Roger runs for days. A clock
+    /// read once at launch would book Monday's dictation into the week that
+    /// ended on Sunday — and the readout would carry the old week's saving into
+    /// the new one.
+    @Test
+    func buchtEinDiktatNachDemWochenwechselInDieNeueWoche() {
+        let url = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let clock = MovingClock(now)
+        let store = HistoryStore(fileURL: url, now: { clock.now })
+
+        // Ten words are 15 s of typing, 5 s spoken.
+        store.append(outcome(tenWords, duration: 5))
+        #expect(abs(saving(store) - (15 - 5)) < 0.001)
+
+        clock.now = nextMonday
+        store.append(outcome("drei kleine Wörter", duration: 1))
+
+        // The old week is settled, the new one counts the second dictation alone:
+        // three words are 4.5 s of typing, 1 s spoken.
+        #expect(saving(store) == 0)
+        #expect(abs(saving(store, at: nextMonday) - (4.5 - 1)) < 0.001)
+    }
+
     @Test
     func schreibtDieGemesseneDauerInDenEintrag() {
         let url = temporaryFile()
@@ -192,5 +216,15 @@ struct HistoryStoreTests {
         #expect(store.records.first?.duration == 4.5)
         #expect(store.lifetimeWords == 3)
         #expect(HistoryStore(fileURL: url, clockAt: now).records.first?.duration == 4.5)
+    }
+}
+
+/// A clock the test moves by hand. `@unchecked Sendable` because it is only ever
+/// touched on the MainActor the store runs on.
+private final class MovingClock: @unchecked Sendable {
+    var now: Date
+
+    init(_ now: Date) {
+        self.now = now
     }
 }
