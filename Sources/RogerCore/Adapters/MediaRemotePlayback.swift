@@ -30,6 +30,12 @@ public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sen
 
     private typealias SendCommand = @convention(c) (Int32, CFDictionary?) -> Bool
 
+    /// A Bluetooth headset lingers in call mode for up to ~2s after the
+    /// microphone closes. Resuming playback into that window plays the first
+    /// seconds in mono over the low-quality call channel and ends on an audible
+    /// dropout, so on Bluetooth the resume waits this long before it plays.
+    private static let bluetoothResumeDelay: Duration = .seconds(2)
+
     private let preference: MusicPausePreference
     private let nowPlaying: any NowPlayingProbing
     /// Every command runs here, one at a time and in the order it was issued.
@@ -45,8 +51,9 @@ public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sen
     /// Guards the resume: without it Roger would start playback that the user
     /// had paused themselves.
     private var didPause = false
-    /// How the output ran before the dictation. The resume waits for this to
-    /// come back — see ``waitForRoute()``.
+    /// The output route as it was before the dictation. Its transport tells the
+    /// resume whether to wait out a Bluetooth headset's call mode — see
+    /// ``waitForHeadsetToLeaveCallMode(_:)``.
     private var routeBeforePause: AudioDeviceEnumerator.OutputRoute?
     /// Set once on quit, never cleared: from here on nothing may wait any more.
     private var isTerminating = false
@@ -88,8 +95,16 @@ public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sen
     }
 
     private func pause() {
-        guard nowPlaying.isPlaying() else {
-            Self.log.info("Nothing playing — nothing to pause.")
+        // The now-playing probe spawns an osascript process (up to ~0.3s).
+        // Asking it *before* pausing meant that, with a Bluetooth headset, the
+        // microphone had already flipped the link into call mode while the music
+        // kept playing in that low-quality channel for the length of the probe.
+        // CoreAudio answers "is the output doing IO right now" instantly, so the
+        // pause goes out at once; pausing a silent output is a harmless no-op,
+        // and leaving `didPause` false there keeps the resume from starting
+        // playback nobody had going.
+        guard AudioDeviceEnumerator.isDefaultOutputRunning() else {
+            Self.log.info("Output idle — nothing to pause.")
             return
         }
         let route = AudioDeviceEnumerator.defaultOutputRoute()
@@ -109,26 +124,23 @@ public final class MediaRemotePlayback: MediaPlaybackControlling, @unchecked Sen
             return (didPause, routeBeforePause)
         }
         guard shouldResume else { return }
-        if waitingForRoute, let baseline { waitForRoute(baseline) }
+        if waitingForRoute { waitForHeadsetToLeaveCallMode(baseline) }
         _ = send(.play)
     }
 
-    /// A Bluetooth headset stays in call mode for around two seconds after the
-    /// microphone closes; music started into that plays in mono, and the switch
-    /// back is audible as a dropout. Built-in and wired outputs never change
-    /// their rate, so for them this returns on the first check.
-    private func waitForRoute(_ baseline: AudioDeviceEnumerator.OutputRoute) {
-        let deadline = ContinuousClock.now + .seconds(4)
+    /// Only Bluetooth needs this: its link stays in call mode for a moment after
+    /// the microphone closes, and starting playback into that plays in mono and
+    /// ends on an audible dropout. Built-in and wired outputs never switch modes,
+    /// so they resume at once. Reading the sample rate turned out not to be a
+    /// reliable tell for every headset, so this just waits a fixed span —
+    /// interruptible on quit so shutdown is not held up.
+    private func waitForHeadsetToLeaveCallMode(_ baseline: AudioDeviceEnumerator.OutputRoute?) {
+        guard baseline?.transport == .bluetooth else { return }
+        let deadline = ContinuousClock.now + Self.bluetoothResumeDelay
         while ContinuousClock.now < deadline {
             guard !lock.withLock({ isTerminating }) else { return }
-            guard let current = AudioDeviceEnumerator.defaultOutputRoute() else { return }
-            // Output was switched or unplugged meanwhile — the old rate says
-            // nothing about the new device.
-            guard current.deviceID == baseline.deviceID else { return }
-            if current.sampleRate == baseline.sampleRate { return }
-            Thread.sleep(forTimeInterval: 0.1)
+            Thread.sleep(forTimeInterval: 0.05)
         }
-        Self.log.info("Output stayed in call mode — resuming anyway.")
     }
 
     /// `true` only means macOS accepted the command — whether an app acted on it

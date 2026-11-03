@@ -6,10 +6,12 @@ import Foundation
 /// Kept as a small stateless facade so `MicrophoneCapture` and the settings UI
 /// call the same code path. All CoreAudio primitive-buffer handling stays here.
 public enum AudioDeviceEnumerator {
-    /// Where sound currently goes, and at which rate.
+    /// Where sound currently goes, and over which transport. The transport is
+    /// how the resume knows a Bluetooth headset is involved and needs the extra
+    /// settle time before playback comes back.
     public struct OutputRoute: Equatable, Sendable {
         public let deviceID: AudioDeviceID
-        public let sampleRate: Double
+        public let transport: InputDevice.Transport
     }
 
     /// Every device that has at least one input stream (i.e. can capture audio).
@@ -104,25 +106,31 @@ public enum AudioDeviceEnumerator {
         devices.first { $0.transport == .builtIn }
     }
 
-    /// The default output device and the rate it currently runs at.
-    ///
-    /// The rate is the tell for a Bluetooth headset's mode: playing music it
-    /// runs at 48 kHz, and while Roger holds the microphone the link drops to
-    /// the call codec at 24 kHz. Coming back takes about two seconds *after*
-    /// the microphone is closed — long enough to hear.
+    /// The default output device and how it connects. A Bluetooth transport is
+    /// the signal that resuming playback must wait for the headset to leave call
+    /// mode — a wired or built-in output never switches modes and resumes at once.
     public static func defaultOutputRoute() -> OutputRoute? {
         guard let id = defaultOutputDeviceID() else { return nil }
+        return OutputRoute(deviceID: id, transport: transport(for: id))
+    }
+
+    /// Whether the default output device is doing IO right now — i.e. something
+    /// is actually coming out of it. Instant, with no process spawn, unlike
+    /// reading now-playing info: the pause can then go out before a Bluetooth
+    /// headset's call-mode switch becomes audible over still-playing music.
+    public static func isDefaultOutputRunning() -> Bool {
+        guard let id = defaultOutputDeviceID() else { return false }
         var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        var rate: Double = 0
-        var size = UInt32(MemoryLayout<Double>.size)
-        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &rate) == noErr, rate > 0 else {
-            return nil
+        var running: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &running) == noErr else {
+            return false
         }
-        return OutputRoute(deviceID: id, sampleRate: rate)
+        return running != 0
     }
 
     // MARK: - CoreAudio plumbing
